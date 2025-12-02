@@ -1,0 +1,8 @@
+streamlit>=1.28.0
+qdrant-client
+requests
+python-dotenv
+google-genai
+azure-identity
+pandas
+openpyxl
