@@ -66,7 +66,7 @@ def render_message_content(content):
                 st.markdown("### Studi Kasus Terkait")
                 
                 # Build Markdown Table
-                table_md = "| Case No | Pertanyaan | Jawaban |\n| :--- | :--- | :--- |\n"
+                table_md = "| Case No | Case | Resolution |\n| :--- | :--- | :--- |\n"
                 for case in cases:
                     # Escape pipes in content to avoid breaking table
                     q = case.get('question', '').replace('|', '\|').replace('\n', '<br>')

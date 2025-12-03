@@ -202,18 +202,17 @@ def search_insw_regulation(user_input):
                         latest_date = date_str
  
         # Add disclaimer about data date if available
-        date_prefix = ""
+        formatted_date = ""
         if latest_date:
             formatted_date = _format_date(latest_date)
-            date_prefix = f"**Berdasarkan data INSW pada {formatted_date}**\n\n"
 
         if max_score < chatbot_utils.CONFIDENCE_THRESHOLD:
             logger.warning(f"INSW Low confidence: {max_score} for query '{user_input}'")
-            return date_prefix + "Maaf, saya tidak menemukan informasi regulasi INSW yang cukup relevan untuk menjawab pertanyaan Anda. Mohon pastikan kata kunci atau HS Code yang Anda masukkan benar." + footer_link
+            return "Maaf, saya tidak menemukan informasi regulasi INSW yang cukup relevan untuk menjawab pertanyaan Anda. Mohon pastikan kata kunci atau HS Code yang Anda masukkan benar." + footer_link
         
         if not results:
             logger.warning(f"INSW No results for query '{user_input}'")
-            return date_prefix + "Tidak ditemukan data INSW yang relevan. Silakan coba kata kunci lain." + footer_link
+            return "Tidak ditemukan data INSW yang relevan. Silakan coba kata kunci lain." + footer_link
         
         # Build context from search results
         context = _build_insw_context(results)
@@ -239,15 +238,17 @@ Format Jawaban:
 5. **Link Referensi**: Sertakan link INSW jika tersedia.
 
 Penting:
+- Awali jawaban dengan menyebutkan tanggal data INSW yang digunakan (jika tersedia di konteks).
 - Selalu sebutkan HS Code lengkap (8 digit)
 - Bedakan dengan jelas antara regulasi Border dan Post-Border
 - Jika ada beberapa HS Code relevan, jelaskan detailnya satu per satu
 - Jika informasi tidak tersedia, nyatakan dengan jelas
-- JANGAN katakan "berdasarkan data yang Anda berikan" - data berasal dari database INSW, bukan dari pengguna
-- Gunakan frasa seperti "berdasarkan data INSW" atau "berdasarkan informasi dari database"""
+- JANGAN katakan "berdasarkan data yang Anda berikan" - data berasal dari database INSW, bukan dari pengguna"""
         
         user_message = f"""Konteks:
 {context}
+
+Data INSW Valid Per Tanggal: {formatted_date}
 
 Pertanyaan: {user_input}
 
@@ -259,7 +260,7 @@ Berikan jawaban yang komprehensif berdasarkan konteks di atas."""
             model=os.getenv("LLM_MODEL", "gemini-2.5-flash"),
             contents=[
                 {"role": "user", "parts": [{"text": system_prompt}]},
-                {"role": "model", "parts": [{"text": "Saya mengerti. Saya akan menjawab pertanyaan tentang regulasi INSW dengan mengutip HS Code, ketentuan import/export (Border/Post-Border), dan dasar hukum yang relevan."}]},
+                {"role": "model", "parts": [{"text": "Saya mengerti. Saya akan menjawab pertanyaan tentang regulasi INSW dengan mengutip HS Code, ketentuan import/export (Border/Post-Border), dan dasar hukum yang relevan, serta menyebutkan tanggal data di awal jawaban."}]},
                 {"role": "user", "parts": [{"text": user_message}]}
             ]
         )
@@ -275,7 +276,7 @@ Berikan jawaban yang komprehensif berdasarkan konteks di atas."""
             "output_chars": len(response.text)
         })
         
-        return date_prefix + response.text + footer_link
+        return response.text + footer_link
     
     except Exception as e:
         logger.error(f"Error searching INSW regulations: {e}", exc_info=True)
