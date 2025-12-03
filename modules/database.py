@@ -4,10 +4,14 @@ from datetime import datetime
 from pathlib import Path
 
 # Database path
-DB_PATH = Path(__file__).parent.parent / "chat_history.db"
+# Database path
+DB_PATH = Path(__file__).parent.parent / "data" / "chat_history.db"
 
 def init_database():
     """Initialize the database and create tables if they don't exist"""
+    # Ensure data directory exists
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     

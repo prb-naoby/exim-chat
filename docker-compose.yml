@@ -7,7 +7,7 @@ services:
     ports:
       - "8504:8504"
     volumes:
-      - ./chat_history.db:/app/chat_history.db
+      - ./data:/app/data
       - ./logs:/app/logs
     env_file:
       - .env
