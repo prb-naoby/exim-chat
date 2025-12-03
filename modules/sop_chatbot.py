@@ -153,8 +153,7 @@ Format Jawaban:
 1. Jawaban Ringkas: Berikan ringkasan singkat dan informatif tentang proses (mencakup pihak yang terlibat, tujuan utama, output yang dihasilkan)
 2. Prosedur langkah demi langkah jika berlaku
 3. Daftar Dokumen yang Dibutuhkan (HANYA ambil dari field "Dokumen" yang tersedia di konteks, jangan buat daftar sendiri. Perbaiki kapitalisasi dengan benar: huruf besar untuk awal kata penting, bukan semua huruf besar)
-4. Referensi ke kasus historis (jika relevan)
-5. Sitasi dokumen menggunakan format dengan hyperlink: [TYPE DOC_NO SOP_TITLE](webUrl)
+4. Sitasi dokumen menggunakan format dengan hyperlink: [TYPE DOC_NO SOP_TITLE](webUrl)
     Contoh: [SOP 17.1 Pemasukan Tooling](https://url-link)
     Format hyperlink Markdown yang benar: [Teks yang ditampilkan](URL lengkap)
     Perbaiki kapitalisasi judul: huruf besar untuk awal kata penting, bukan semua huruf besar

@@ -66,13 +66,12 @@ def render_message_content(content):
                 st.markdown("### Studi Kasus Terkait")
                 
                 # Build Markdown Table
-                table_md = "| Case No | Case | Resolution |\n| :--- | :--- | :--- |\n"
+                table_md = "| Case | Resolution |\n| :--- | :--- |\n"
                 for case in cases:
                     # Escape pipes in content to avoid breaking table
                     q = case.get('question', '').replace('|', '\|').replace('\n', '<br>')
                     a = case.get('answer', '').replace('|', '\|').replace('\n', '<br>')
-                    no = case.get('case_no', '')
-                    table_md += f"| #{no} | {q} | {a} |\n"
+                    table_md += f"| {q} | {a} |\n"
                 
                 st.markdown(table_md, unsafe_allow_html=True)
         except Exception as e:
