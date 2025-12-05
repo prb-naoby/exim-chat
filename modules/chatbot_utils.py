@@ -94,7 +94,7 @@ def render_chat_message(message, idx, session_key, edit_key, regen_callback):
         # Header with timestamp
         if "timestamp" in message:
             st.markdown(
-                f"<div style='font-size: 0.75rem; color: #888; margin-bottom: 0.2rem;'>{message['timestamp']}</div>", 
+                f"<div style='font-size: 0.75rem; color: var(--text-color); opacity: 0.6; margin-bottom: 0.2rem;'>{message['timestamp']}</div>", 
                 unsafe_allow_html=True
             )
         
@@ -129,7 +129,7 @@ def handle_chat_input(prompt, session_key, chatbot_type, response_generator):
     
     # 4. Show User Message immediately
     with st.chat_message("user"):
-        st.markdown(f"<div style='font-size: 0.75rem; color: #888; margin-bottom: 0.2rem;'>{user_timestamp}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='font-size: 0.75rem; color: var(--text-color); opacity: 0.6; margin-bottom: 0.2rem;'>{user_timestamp}</div>", unsafe_allow_html=True)
         st.markdown(prompt)
     
     # 5. Generate Response
@@ -138,7 +138,7 @@ def handle_chat_input(prompt, session_key, chatbot_type, response_generator):
             response = response_generator(prompt)
             assistant_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            st.markdown(f"<div style='font-size: 0.75rem; color: #888; margin-bottom: 0.2rem;'>{assistant_timestamp}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size: 0.75rem; color: var(--text-color); opacity: 0.6; margin-bottom: 0.2rem;'>{assistant_timestamp}</div>", unsafe_allow_html=True)
             render_message_content(response)
     
     # 6. Add Assistant Message to State

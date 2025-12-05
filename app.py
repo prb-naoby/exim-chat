@@ -38,21 +38,20 @@ def check_password():
 
     # Custom CSS for the login page
     st.markdown("""
-        <style>
         /* Target the login form container */
         [data-testid="stForm"] {
-            background-color: #1E1E1E;
+            background-color: var(--secondary-background-color);
             padding: 2rem;
             border-radius: 10px;
-            border: 1px solid #333;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(128, 128, 128, 0.2);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
         
         /* Input field styling */
         .stTextInput input {
-            background-color: #2D2D2D !important;
-            color: white !important;
-            border: 1px solid #444 !important;
+            background-color: var(--background-color) !important;
+            color: var(--text-color) !important;
+            border: 1px solid rgba(128, 128, 128, 0.2) !important;
         }
         
         /* Submit button styling - Red color */
@@ -194,6 +193,7 @@ def main():
             
             /* Hide default streamlit elements except sidebar toggle */
             #MainMenu {visibility: hidden;}
+            .stAppDeployButton {visibility: hidden;}
             footer {visibility: hidden;}
             
             /* Chat container - adapts to theme */
@@ -297,7 +297,7 @@ def main():
                     st.session_state.current_session_id = str(uuid.uuid4())
                 st.rerun()
         
-        if st.button("📋 INSW", key="nav_insw", use_container_width=True, type="primary" if st.session_state.current_page == "INSW" else "secondary"):
+        if st.button("📋 HS Code", key="nav_insw", use_container_width=True, type="primary" if st.session_state.current_page == "INSW" else "secondary"):
             if st.session_state.current_page != "INSW":
                 st.session_state.current_page = "INSW"
                 if st.session_state.current_session_id is None:
