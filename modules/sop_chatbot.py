@@ -51,7 +51,7 @@ def _search_sop_collection(query_vector: List[float], query_text: str, limit: in
             'date': point.payload.get('date', ''),
             'doc_no': point.payload.get('doc_no', ''),
             'rev': point.payload.get('rev', ''),
-            'webUrl': point.payload.get('webUrl', ''),
+            'webUrl': point.payload.get('@microsoft.graph.downloadUrl', ''),
             'score': point.score
         })
     
