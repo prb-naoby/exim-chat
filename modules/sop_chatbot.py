@@ -45,13 +45,15 @@ def _search_sop_collection(query_vector: List[float], query_text: str, limit: in
     
     for point in results.points:
         # Use local trigger link for on-demand generation
-        filename = point.payload.get('dokumen', '')
-        # Fallback to webUrl if filename is missing (though we need filename for download)
+        # "dokumen" field is list of required docs, NOT the filename.
+        # "filename" field contains the source PDF filename (from ingestion).
+        filename = point.payload.get('filename', '')
+        
+        # Fallback to webUrl if filename is missing
         web_url = point.payload.get('webUrl', '')
         
         if filename:
             # Create a local link that triggers the app.py redirection logic
-            # This avoids generating the link eagerly
             safe_filename = urllib.parse.quote(filename)
             web_url = f"/?download_file={safe_filename}"
 
