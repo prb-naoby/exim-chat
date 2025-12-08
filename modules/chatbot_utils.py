@@ -1,6 +1,50 @@
 import json
+import streamlit as st
+from datetime import datetime
+from modules import database
+import os
+from google import genai
 
-# ... (existing imports)
+# Confidence threshold for retrieval results
+# Reads from environment variable, defaults to 0.6
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.6"))
+
+def init_gemini_client():
+    """Initialize and return Gemini client"""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        st.error("GEMINI_API_KEY not found in environment variables.")
+        return None
+    return genai.Client(api_key=api_key)
+
+def create_embedding(client, text: str, model: str = "models/gemini-embedding-001"):
+    """Create dense embedding using Gemini"""
+    try:
+        response = client.models.embed_content(
+            model=model,
+            contents=text
+        )
+        return response.embeddings[0].values
+    except Exception as e:
+        print(f"Error creating embedding: {e}")
+        return [0.0] * 3072
+
+def create_sparse_vector(text: str):
+    """Create sparse BM25-like vector from text"""
+    words = text.lower().split()
+    word_freq = {}
+    for word in words:
+        if len(word) > 2:
+            word_freq[word] = word_freq.get(word, 0) + 1
+    
+    indices = []
+    values = []
+    for word, freq in word_freq.items():
+        idx = abs(hash(word)) % (10**6)
+        indices.append(idx)
+        values.append(freq)
+    
+    return {"indices": indices, "values": values}
 
 def render_message_content(content):
     """
