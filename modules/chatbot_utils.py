@@ -44,18 +44,21 @@ def get_onedrive_token():
 def get_onedrive_download_link(filename):
     """
     Generate a 1-hour valid download link for a file in OneDrive.
-    Uses direct path addressing. No caching.
+    Caches the link in Redis for 3599 seconds.
     """
-    import urllib.parse
-    
-    # 1. Get Config
+    # 1. Check Cache
+    cache_key = f"onedrive_link:{filename}"
+    cached_link = database.redis_client.get(cache_key)
+    if cached_link:
+        return cached_link
+
+    # 2. Get Sync Param
     drive_id = os.getenv('ONEDRIVE_DRIVE_ID')
     folder_path = os.getenv('SOP_FOLDER_PATH')
     
     if not drive_id or not folder_path:
         return None
 
-    # 2. Get Token
     token = get_onedrive_token()
     if not token:
         return None
@@ -64,35 +67,34 @@ def get_onedrive_download_link(filename):
     graph_base_url = "https://graph.microsoft.com/v1.0"
 
     try:
-        # 3. Generate Link directly by Path
-        # POST /drives/{drive-id}/root:/{path}:/createLink
-        safe_filename = urllib.parse.quote(filename)
-        # Ensure folder path doesn't end with slash to avoid double slash
-        clean_folder = folder_path.strip("/")
-        
-        link_url = f"{graph_base_url}/drives/{drive_id}/root:/{clean_folder}/{safe_filename}:/createLink"
-        
-        body = {
-            "type": "view",
-            "scope": "organization"
-        }
-        
-        response = requests.post(link_url, headers=headers, json=body)
-        
-        # If 404, maybe filename doesn't match exactly? 
-        # But user said "no need search", so we assume exact match.
-        if response.status_code == 404:
-            print(f"File not found at path: {clean_folder}/{filename}")
-            return None
-            
+        # 3. Search for File
+        # We search specifically in the SOP folder
+        search_url = f"{graph_base_url}/drives/{drive_id}/root:/{folder_path}:/search(q='{filename}')"
+        response = requests.get(search_url, headers=headers)
         response.raise_for_status()
-        link_data = response.json()
+        data = response.json()
+
+        download_url = None
+        # Find exact match or best match
+        for item in data.get('value', []):
+            if filename in item['name']:
+                # Get the temporary download URL directly
+                download_url = item.get('@microsoft.graph.downloadUrl')
+                break
         
-        return link_data.get('link', {}).get('webUrl')
+        if not download_url:
+            print(f"File not found or no download URL: {filename}")
+            return None
+
+        # 5. Cache in Redis
+        database.redis_client.setex(cache_key, 3599, download_url)
+        return download_url
             
     except Exception as e:
         print(f"Error generating OneDrive link: {e}")
         return None
+    
+    return None
 
 def create_embedding(client, text: str, model: str = "models/gemini-embedding-001"):
     """Create dense embedding using Gemini"""

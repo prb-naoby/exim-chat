@@ -166,6 +166,24 @@ def delete_session_with_confirm(session_id, chatbot_type):
 def main():
     """Main application"""
     
+    # 1. Check for download request (Redirection)
+    # Using st.query_params (Streamlit >= 1.30) or st.experimental_get_query_params
+    query_params = st.query_params
+    if "download_file" in query_params:
+        filename = query_params["download_file"]
+        # Clear param so we don't loop
+        # st.query_params.clear() # Not always safe to clear immediately if redirecting?
+        
+        with st.spinner(f"Generating download link for {filename}..."):
+            download_url = chatbot_utils.get_onedrive_download_link(filename)
+            
+            if download_url:
+                # Redirect
+                st.markdown(f'<meta http-equiv="refresh" content="0; url={download_url}">', unsafe_allow_html=True)
+                st.stop()
+            else:
+                st.error("Failed to generate download link or file not found.")
+
     # 1. Authentication Check
     if not check_password():
         return

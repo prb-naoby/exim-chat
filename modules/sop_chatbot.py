@@ -41,15 +41,19 @@ def _search_sop_collection(query_vector: List[float], query_text: str, limit: in
     )
     
     formatted_results = []
+    import urllib.parse
+    
     for point in results.points:
-        # Try to get generated download link from filename
+        # Use local trigger link for on-demand generation
         filename = point.payload.get('dokumen', '')
+        # Fallback to webUrl if filename is missing (though we need filename for download)
         web_url = point.payload.get('webUrl', '')
         
         if filename:
-            generated_link = chatbot_utils.get_onedrive_download_link(filename)
-            if generated_link:
-                web_url = generated_link
+            # Create a local link that triggers the app.py redirection logic
+            # This avoids generating the link eagerly
+            safe_filename = urllib.parse.quote(filename)
+            web_url = f"/?download_file={safe_filename}"
 
         formatted_results.append({
             'sop_title': point.payload.get('sop_title', ''),
