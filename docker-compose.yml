@@ -24,6 +24,8 @@ services:
       - LLM_MODEL=${LLM_MODEL}
     networks:
       - default
+      - redis
+      - nginx-network
     restart: unless-stopped
 
 volumes:
@@ -33,3 +35,7 @@ volumes:
 networks:
   default:
     name: exim_network
+  redis:
+    external: true
+  nginx-network:
+    external: true
