@@ -109,33 +109,25 @@ def _build_insw_context(results: list) -> str:
             item += "   [Ketentuan Impor Umum]:\n"
             for r in import_regs:
                 item += f"    - {r.get('name', '')}\n"
-                if r.get('legal'): item += f"      Regulasi: {r.get('legal')}\n"
-                if r.get('komoditi'): item += f"      Komoditi: {r.get('komoditi')}\n"
-                if r.get('deskripsi'): item += f"      Deskripsi: {r.get('deskripsi')}\n"
+                if r.get('legal'): item += f"      Legal: {r.get('legal')}\n"
 
         if import_border:
             item += "   [Ketentuan Impor Border (Pengawasan di Perbatasan)]:\n"
             for r in import_border:
                 item += f"    - {r.get('name', '')}\n"
-                if r.get('legal'): item += f"      Regulasi: {r.get('legal')}\n"
-                if r.get('komoditi'): item += f"      Komoditi: {r.get('komoditi')}\n"
-                if r.get('deskripsi'): item += f"      Deskripsi: {r.get('deskripsi')}\n"
+                if r.get('legal'): item += f"      Legal: {r.get('legal')}\n"
 
         if import_post_border:
             item += "   [Ketentuan Impor Post-Border (Pengawasan Setelah Keluar Pelabuhan)]:\n"
             for r in import_post_border:
                 item += f"    - {r.get('name', '')}\n"
-                if r.get('legal'): item += f"      Regulasi: {r.get('legal')}\n"
-                if r.get('komoditi'): item += f"      Komoditi: {r.get('komoditi')}\n"
-                if r.get('deskripsi'): item += f"      Deskripsi: {r.get('deskripsi')}\n"
+                if r.get('legal'): item += f"      Legal: {r.get('legal')}\n"
 
         if export_regs:
             item += "   [Ketentuan Ekspor]:\n"
             for r in export_regs:
                 item += f"    - {r.get('name', '')}\n"
-                if r.get('legal'): item += f"      Regulasi: {r.get('legal')}\n"
-                if r.get('komoditi'): item += f"      Komoditi: {r.get('komoditi')}\n"
-                if r.get('deskripsi'): item += f"      Deskripsi: {r.get('deskripsi')}\n"
+                if r.get('legal'): item += f"      Legal: {r.get('legal')}\n"
 
         # BC Documents
         if bc_documents:
@@ -210,17 +202,18 @@ def search_insw_regulation(user_input):
                         latest_date = date_str
  
         # Add disclaimer about data date if available
-        formatted_date = ""
+        date_prefix = ""
         if latest_date:
             formatted_date = _format_date(latest_date)
+            date_prefix = f"**Berdasarkan data INSW pada {formatted_date}**\n\n"
 
         if max_score < chatbot_utils.CONFIDENCE_THRESHOLD:
             logger.warning(f"INSW Low confidence: {max_score} for query '{user_input}'")
-            return "Maaf, saya tidak menemukan informasi regulasi INSW yang cukup relevan untuk menjawab pertanyaan Anda. Mohon pastikan kata kunci atau HS Code yang Anda masukkan benar." + footer_link
+            return date_prefix + "Maaf, saya tidak menemukan informasi regulasi INSW yang cukup relevan untuk menjawab pertanyaan Anda. Mohon pastikan kata kunci atau HS Code yang Anda masukkan benar." + footer_link
         
         if not results:
             logger.warning(f"INSW No results for query '{user_input}'")
-            return "Tidak ditemukan data INSW yang relevan. Silakan coba kata kunci lain." + footer_link
+            return date_prefix + "Tidak ditemukan data INSW yang relevan. Silakan coba kata kunci lain." + footer_link
         
         # Build context from search results
         context = _build_insw_context(results)
@@ -238,29 +231,23 @@ Peran Anda:
 Format Jawaban:
 1. **Ringkasan**: Jawaban singkat tentang HS Code, uraian barang, dan status regulasinya.
 2. **Detail Regulasi**:
-   - **Impor (Border)**: Ketentuan yang harus dipenuhi di perbatasan. Tampilkan detail:
-     - Nama Regulasi
-     - Regulasi (Dasar Hukum)
-     - Komoditi
-     - Deskripsi
-   - **Impor (Post-Border)**: Ketentuan yang harus dipenuhi setelah keluar pelabuhan. Tampilkan detail yang sama.
-   - **Ekspor**: Ketentuan ekspor.
+   - **Impor (Border)**: Ketentuan yang harus dipenuhi di perbatasan (jika ada).
+   - **Impor (Post-Border)**: Ketentuan yang harus dipenuhi setelah keluar pelabuhan (jika ada).
+   - **Ekspor**: Ketentuan ekspor (jika ada).
 3. **Dokumen yang Diperlukan**: Dokumen BC dan perizinan yang dibutuhkan.
 4. **Dasar Hukum**: Peraturan yang menjadi dasar ketentuan.
 5. **Link Referensi**: Sertakan link INSW jika tersedia.
 
 Penting:
-- Sebutkan tanggal data INSW (jika ada) secara natural di dalam kalimat pembuka.
 - Selalu sebutkan HS Code lengkap (8 digit)
 - Bedakan dengan jelas antara regulasi Border dan Post-Border
 - Jika ada beberapa HS Code relevan, jelaskan detailnya satu per satu
 - Jika informasi tidak tersedia, nyatakan dengan jelas
-- JANGAN katakan "berdasarkan data yang Anda berikan" - data berasal dari database INSW, bukan dari pengguna"""
+- JANGAN katakan "berdasarkan data yang Anda berikan" - data berasal dari database INSW, bukan dari pengguna
+- Gunakan frasa seperti "berdasarkan data INSW" atau "berdasarkan informasi dari database"""
         
         user_message = f"""Konteks:
 {context}
-
-Data INSW Valid Per Tanggal: {formatted_date}
 
 Pertanyaan: {user_input}
 
@@ -272,7 +259,7 @@ Berikan jawaban yang komprehensif berdasarkan konteks di atas."""
             model=os.getenv("LLM_MODEL", "gemini-2.5-flash"),
             contents=[
                 {"role": "user", "parts": [{"text": system_prompt}]},
-                {"role": "model", "parts": [{"text": "Saya mengerti. Saya akan menyampaikan informasi regulasi INSW (HS Code, Lartas, dll) dengan menyertakan tanggal data secara natural di awal penjelasan."}]},
+                {"role": "model", "parts": [{"text": "Saya mengerti. Saya akan menjawab pertanyaan tentang regulasi INSW dengan mengutip HS Code, ketentuan import/export (Border/Post-Border), dan dasar hukum yang relevan."}]},
                 {"role": "user", "parts": [{"text": user_message}]}
             ]
         )
@@ -288,7 +275,7 @@ Berikan jawaban yang komprehensif berdasarkan konteks di atas."""
             "output_chars": len(response.text)
         })
         
-        return response.text + footer_link
+        return date_prefix + response.text + footer_link
     
     except Exception as e:
         logger.error(f"Error searching INSW regulations: {e}", exc_info=True)

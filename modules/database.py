@@ -29,6 +29,14 @@ def init_database():
     except redis.ConnectionError:
         print("Failed to connect to Redis. Make sure Redis is running.")
 
+def get_or_create_user(username):
+    """
+    In Redis, we don't need to explicitly create users in a separate table.
+    We just use the username in the key.
+    But for compatibility with the interface:
+    """
+    return username
+
 def save_message(username, chatbot_type, role, content, session_id, timestamp=None):
     """Save a chat message to Redis"""
     if timestamp is None:
