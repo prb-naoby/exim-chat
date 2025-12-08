@@ -7,3 +7,4 @@ azure-identity
 pandas
 openpyxl
 python-dateutil
+redis

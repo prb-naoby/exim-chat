@@ -1,312 +1,204 @@
-import sqlite3
+import redis
 import json
 from datetime import datetime
-from pathlib import Path
+import os
+from dotenv import load_dotenv
 
-# Database path
-# Database path
-DB_PATH = Path(__file__).parent.parent / "data" / "chat_history.db"
+load_dotenv()
+
+# Redis Configuration
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_DB = 0
+
+# Initialize Redis client
+redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
 
 def init_database():
-    """Initialize the database and create tables if they don't exist"""
-    # Ensure data directory exists
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Create users table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # Create chat_history table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS chat_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            chatbot_type TEXT NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            session_id TEXT NOT NULL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(user_id)
-        )
-    """)
-    
-    # Check if session_id column exists, if not add it (migration)
-    cursor.execute("PRAGMA table_info(chat_history)")
-    columns = [column[1] for column in cursor.fetchall()]
-    
-    if "session_id" not in columns:
-        # Add session_id column with default value
-        cursor.execute("ALTER TABLE chat_history ADD COLUMN session_id TEXT DEFAULT 'legacy'")
-        conn.commit()
-    
-    # Create index for faster queries
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_user_chatbot 
-        ON chat_history(user_id, chatbot_type, session_id, timestamp)
-    """)
-    
-    conn.commit()
-    conn.close()
-
-def get_or_create_user(username):
-    """Get user_id or create new user if doesn't exist"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Try to get existing user
-    cursor.execute("SELECT user_id FROM users WHERE username = ?", (username,))
-    result = cursor.fetchone()
-    
-    if result:
-        user_id = result[0]
-    else:
-        # Create new user
-        cursor.execute("INSERT INTO users (username) VALUES (?)", (username,))
-        user_id = cursor.lastrowid
-        conn.commit()
-    
-    conn.close()
-    return user_id
+    """Check Redis connection"""
+    try:
+        redis_client.ping()
+        print("Successfully connected to Redis")
+    except redis.ConnectionError:
+        print("Failed to connect to Redis. Make sure Redis is running.")
 
 def save_message(username, chatbot_type, role, content, session_id, timestamp=None):
-    """Save a chat message to the database with optional timestamp"""
+    """Save a chat message to Redis"""
     if timestamp is None:
         timestamp = datetime.now().isoformat()
     
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    # Message object
+    message = {
+        "role": role,
+        "content": content,
+        "timestamp": timestamp,
+        "chatbot_type": chatbot_type
+    }
     
-    user_id = get_or_create_user(username)
+    # Keys
+    session_key = f"session:{session_id}:messages"
+    meta_key = f"session:{session_id}:meta"
     
-    cursor.execute("""
-        INSERT INTO chat_history (user_id, chatbot_type, role, content, session_id, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (user_id, chatbot_type, role, content, session_id, timestamp))
+    # Use pipeline for atomic operations
+    pipe = redis_client.pipeline()
     
-    conn.commit()
-    conn.close()
+    # 1. Push message to list (Right Push preserves order)
+    pipe.rpush(session_key, json.dumps(message))
+    
+    # 2. Update session metadata and last_activity
+    pipe.hset(meta_key, mapping={
+        "username": username,
+        "chatbot_type": chatbot_type,
+        "last_activity": timestamp
+    })
+    
+    # 3. Add to sorted set of sessions for the user (score = timestamp)
+    user_sessions_key = f"user:{username}:sessions:{chatbot_type}"
+    # Score is timestamp as float (or int) for sorting
+    try:
+        score = datetime.fromisoformat(timestamp).timestamp()
+    except:
+        score = datetime.now().timestamp()
+        
+    pipe.zadd(user_sessions_key, {session_id: score})
+    
+    pipe.execute()
 
 def load_chat_history(username, chatbot_type, session_id=None):
-    """Load chat history for a specific user and chatbot, optionally filtered by session"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    """Load chat history from Redis"""
+    if not session_id:
+        return []
+        
+    session_key = f"session:{session_id}:messages"
     
-    user_id = get_or_create_user(username)
-    
-    if session_id:
-        cursor.execute("""
-            SELECT role, content, timestamp
-            FROM chat_history
-            WHERE user_id = ? AND chatbot_type = ? AND session_id = ?
-            ORDER BY timestamp ASC
-        """, (user_id, chatbot_type, session_id))
-    else:
-        cursor.execute("""
-            SELECT role, content, timestamp
-            FROM chat_history
-            WHERE user_id = ? AND chatbot_type = ?
-            ORDER BY timestamp ASC
-        """, (user_id, chatbot_type))
+    # Get all messages from list
+    raw_messages = redis_client.lrange(session_key, 0, -1)
     
     messages = []
-    for row in cursor.fetchall():
-        messages.append({
-            "role": row[0],
-            "content": row[1],
-            "timestamp": row[2]
-        })
-    
-    conn.close()
+    for raw in raw_messages:
+        try:
+            msg = json.loads(raw)
+            messages.append(msg)
+        except json.JSONDecodeError:
+            continue
+            
     return messages
 
 def clear_chat_history(username, chatbot_type, session_id=None):
-    """Clear chat history for a specific user and chatbot, optionally for a specific session"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    user_id = get_or_create_user(username)
-    
-    if session_id:
-        cursor.execute("""
-            DELETE FROM chat_history
-            WHERE user_id = ? AND chatbot_type = ? AND session_id = ?
-        """, (user_id, chatbot_type, session_id))
-    else:
-        cursor.execute("""
-            DELETE FROM chat_history
-            WHERE user_id = ? AND chatbot_type = ?
-        """, (user_id, chatbot_type))
-    
-    conn.commit()
-    conn.close()
+    """Clear chat history (delete session)"""
+    if not session_id:
+        return
 
-def get_all_chat_history(username):
-    """Get all chat history for a user (for export or analytics)"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    session_key = f"session:{session_id}:messages"
+    meta_key = f"session:{session_id}:meta"
+    user_sessions_key = f"user:{username}:sessions:{chatbot_type}"
     
-    user_id = get_or_create_user(username)
-    
-    cursor.execute("""
-        SELECT chatbot_type, role, content, timestamp
-        FROM chat_history
-        WHERE user_id = ?
-        ORDER BY timestamp ASC
-    """, (user_id,))
-    
-    messages = []
-    for row in cursor.fetchall():
-        messages.append({
-            "chatbot_type": row[0],
-            "role": row[1],
-            "content": row[2],
-            "timestamp": row[3]
-        })
-    
-    conn.close()
-    return messages
-
-def get_chat_statistics(username):
-    """Get statistics about user's chat usage"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    user_id = get_or_create_user(username)
-    
-    cursor.execute("""
-        SELECT 
-            chatbot_type,
-            COUNT(*) as message_count,
-            MIN(timestamp) as first_message,
-            MAX(timestamp) as last_message
-        FROM chat_history
-        WHERE user_id = ? AND role = 'user'
-        GROUP BY chatbot_type
-    """, (user_id,))
-    
-    stats = {}
-    for row in cursor.fetchall():
-        stats[row[0]] = {
-            "message_count": row[1],
-            "first_message": row[2],
-            "last_message": row[3]
-        }
-    
-    conn.close()
-    return stats
+    pipe = redis_client.pipeline()
+    pipe.delete(session_key)
+    pipe.delete(meta_key)
+    pipe.zrem(user_sessions_key, session_id)
+    pipe.execute()
 
 def get_chat_sessions(username, chatbot_type):
-    """Get all chat sessions for a user and chatbot type"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    """Get all chat sessions for a user and chatbot type sorted by last activity"""
+    user_sessions_key = f"user:{username}:sessions:{chatbot_type}"
     
-    user_id = get_or_create_user(username)
-    
-    cursor.execute("""
-        SELECT 
-            session_id,
-            MIN(timestamp) as first_message_time,
-            MAX(timestamp) as last_message_time,
-            COUNT(*) as message_count,
-            (SELECT content FROM chat_history 
-             WHERE user_id = ? AND chatbot_type = ? AND session_id = ch.session_id AND role = 'user'
-             ORDER BY timestamp ASC LIMIT 1) as first_user_message
-        FROM chat_history ch
-        WHERE user_id = ? AND chatbot_type = ?
-        GROUP BY session_id
-        ORDER BY last_message_time DESC
-    """, (user_id, chatbot_type, user_id, chatbot_type))
+    # Get session IDs sorted by score (timestamp) descending
+    session_ids = redis_client.zrevrange(user_sessions_key, 0, -1)
     
     sessions = []
-    for row in cursor.fetchall():
-        # Create a title from the first user message (truncate if too long)
-        first_message = row[4] if row[4] else "New Chat"
-        title = first_message[:50] + "..." if len(first_message) > 50 else first_message
+    for sid in session_ids:
+        meta_key = f"session:{sid}:meta"
+        messages_key = f"session:{sid}:messages"
+        
+        # Get metadata
+        meta = redis_client.hgetall(meta_key)
+        
+        # Get first message for title
+        first_msg_raw = redis_client.lindex(messages_key, 0)
+        first_msg_content = "New Chat"
+        if first_msg_raw:
+            try:
+                first_msg_content = json.loads(first_msg_raw).get("content", "New Chat")
+            except:
+                pass
+                
+        title = meta.get("title", first_msg_content[:50] + "..." if len(first_msg_content) > 50 else first_msg_content)
+        
+        # Get message count
+        count = redis_client.llen(messages_key)
         
         sessions.append({
-            "session_id": row[0],
-            "first_message_time": row[1],
-            "last_message_time": row[2],
-            "message_count": row[3],
-            "title": title
+            "session_id": sid,
+            "title": title,
+            "message_count": count,
+            "last_message_time": meta.get("last_activity", "")
         })
-    
-    conn.close()
+        
     return sessions
 
 def create_empty_session(username, chatbot_type, session_id):
-    """Create an empty session placeholder so it appears in sidebar immediately"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    """Create an empty session placeholder"""
+    timestamp = datetime.now().isoformat()
+    meta_key = f"session:{session_id}:meta"
+    user_sessions_key = f"user:{username}:sessions:{chatbot_type}"
     
-    user_id = get_or_create_user(username)
+    pipe = redis_client.pipeline()
+    pipe.hset(meta_key, mapping={
+        "username": username,
+        "chatbot_type": chatbot_type,
+        "created_at": timestamp,
+        "last_activity": timestamp,
+        "title": "New Chat"
+    })
     
-    # Insert a system message to mark the session as created
-    cursor.execute("""
-        INSERT INTO chat_history (user_id, chatbot_type, role, content, session_id)
-        VALUES (?, ?, ?, ?, ?)
-    """, (user_id, chatbot_type, "system", "Session created", session_id))
-    
-    conn.commit()
-    conn.close()
+    score = datetime.now().timestamp()
+    pipe.zadd(user_sessions_key, {session_id: score})
+    pipe.execute()
 
 def update_session_title(username, chatbot_type, session_id):
-    """Update session by removing system placeholder if user has sent messages"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    """Update session title based on first user message"""
+    messages_key = f"session:{session_id}:messages"
+    meta_key = f"session:{session_id}:meta"
     
-    user_id = get_or_create_user(username)
-    
-    # Check if there are user messages
-    cursor.execute("""
-        SELECT COUNT(*) FROM chat_history
-        WHERE user_id = ? AND chatbot_type = ? AND session_id = ? AND role = 'user'
-    """, (user_id, chatbot_type, session_id))
-    
-    user_message_count = cursor.fetchone()[0]
-    
-    # If there are user messages, remove the system placeholder
-    if user_message_count > 0:
-        cursor.execute("""
-            DELETE FROM chat_history
-            WHERE user_id = ? AND chatbot_type = ? AND session_id = ? AND role = 'system'
-        """, (user_id, chatbot_type, session_id))
-        conn.commit()
-    
-    conn.close()
+    # Find first user message
+    messages = redis_client.lrange(messages_key, 0, -1)
+    for raw in messages:
+        try:
+            msg = json.loads(raw)
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                title = content[:50] + "..." if len(content) > 50 else content
+                redis_client.hset(meta_key, "title", title)
+                break
+        except:
+            continue
 
 def delete_session(username, chatbot_type, session_id):
-    """Delete a specific chat session"""
     clear_chat_history(username, chatbot_type, session_id)
 
 def get_last_empty_session(username, chatbot_type):
-    """Get the last session if it's empty (only has system message), otherwise return None"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    """Get last empty session"""
+    # Simply check the most recent session
+    user_sessions_key = f"user:{username}:sessions:{chatbot_type}"
+    last_ids = redis_client.zrevrange(user_sessions_key, 0, 0)
     
-    user_id = get_or_create_user(username)
+    if not last_ids:
+        return None
+        
+    sid = last_ids[0]
+    messages_key = f"session:{sid}:messages"
+    count = redis_client.llen(messages_key)
     
-    cursor.execute("""
-        SELECT session_id FROM chat_history
-        WHERE user_id = ? AND chatbot_type = ?
-        GROUP BY session_id
-        HAVING (
-            COUNT(CASE WHEN role = 'user' THEN 1 END) = 0
-            AND COUNT(CASE WHEN role = 'assistant' THEN 1 END) = 0
-        )
-        ORDER BY MAX(timestamp) DESC
-        LIMIT 1
-    """, (user_id, chatbot_type))
-    
-    result = cursor.fetchone()
-    conn.close()
-    
-    return result[0] if result else None
+    if count == 0:
+        return sid
+    return None
+
+# Status management for async processing
+def set_session_status(session_id, status):
+    """Set session status (processing/idle)"""
+    redis_client.hset(f"session:{session_id}:meta", "status", status)
+
+def get_session_status(session_id):
+    """Get session status"""
+    return redis_client.hget(f"session:{session_id}:meta", "status") or "idle"

@@ -177,10 +177,25 @@ def main():
     if "messages_sop" not in st.session_state:
         st.session_state.messages_sop = []
     
-    # Initialize session ID if not exists
+    # Initialize session ID and load history if not exists
     if st.session_state.current_session_id is None:
-        import uuid
-        st.session_state.current_session_id = str(uuid.uuid4())
+        # Try to recover latest session
+        sessions = database.get_chat_sessions("guest", st.session_state.current_page)
+        if sessions:
+            # Load latest
+            last_session = sessions[0]
+            st.session_state.current_session_id = last_session["session_id"]
+            
+            # Load messages
+            msgs = database.load_chat_history("guest", st.session_state.current_page, st.session_state.current_session_id)
+            if st.session_state.current_page == "INSW":
+                st.session_state.messages_insw = [{"role": m["role"], "content": m["content"], "timestamp": m.get("timestamp")} for m in msgs]
+            else:
+                st.session_state.messages_sop = [{"role": m["role"], "content": m["content"], "timestamp": m.get("timestamp")} for m in msgs]
+        else:
+            # Create new
+            import uuid
+            st.session_state.current_session_id = str(uuid.uuid4())
     
     # Custom CSS for minimal, elegant design (supports dark and light mode)
     st.markdown("""

@@ -318,20 +318,27 @@ def show():
         )
     
     # Chat input
-    if "insw_processing" not in st.session_state:
-        st.session_state.insw_processing = False
+    # Check status from DB
+    session_id = st.session_state.get("current_session_id")
+    if not session_id:
+        return
 
-    def on_input_submit():
-        st.session_state.insw_processing = True
+    status = database.get_session_status(session_id)
+    is_processing = (status == "processing")
 
     prompt = st.chat_input(
         "Search for INSW regulations... (e.g., 'export permit requirements')",
         key="insw_input",
-        disabled=st.session_state.insw_processing,
-        on_submit=on_input_submit
+        disabled=is_processing
     )
 
-    if st.session_state.insw_processing and prompt:
+    if prompt:
         chatbot_utils.handle_chat_input(prompt, "messages_insw", "INSW", search_insw_regulation)
-        st.session_state.insw_processing = False
-        st.rerun()
+    
+    # Polling if processing
+    if is_processing:
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                import time
+                time.sleep(1)
+                st.rerun()
