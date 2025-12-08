@@ -7,12 +7,21 @@ services:
     volumes:
       - exim_data:/app/data
       - ./logs:/app/logs
-    env_file:
-      - .env
     environment:
       - REDIS_HOST=${REDIS_HOST}
       - REDIS_PORT=${REDIS_PORT}
       - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - APP_PASSWORD=${APP_PASSWORD}
+      - INSW_QDRANT_URL=${INSW_QDRANT_URL}
+      - INSW_QDRANT_API_KEY=${INSW_QDRANT_API_KEY}
+      - INSW_QDRANT_COLLECTION_NAME=${INSW_QDRANT_COLLECTION_NAME}
+      - SOP_QDRANT_URL=${SOP_QDRANT_URL}
+      - SOP_QDRANT_API_KEY=${SOP_QDRANT_API_KEY}
+      - SOP_QDRANT_COLLECTION_NAME=${SOP_QDRANT_COLLECTION_NAME}
+      - CASES_QDRANT_COLLECTION_NAME=${CASES_QDRANT_COLLECTION_NAME}
+      - CONFIDENCE_THRESHOLD=${CONFIDENCE_THRESHOLD}
+      - LLM_MODEL=${LLM_MODEL}
     networks:
       - default
     restart: unless-stopped
