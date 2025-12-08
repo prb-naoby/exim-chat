@@ -42,6 +42,15 @@ def _search_sop_collection(query_vector: List[float], query_text: str, limit: in
     
     formatted_results = []
     for point in results.points:
+        # Try to get generated download link from filename
+        filename = point.payload.get('dokumen', '')
+        web_url = point.payload.get('webUrl', '')
+        
+        if filename:
+            generated_link = chatbot_utils.get_onedrive_download_link(filename)
+            if generated_link:
+                web_url = generated_link
+
         formatted_results.append({
             'sop_title': point.payload.get('sop_title', ''),
             'type': point.payload.get('type', ''),
@@ -51,7 +60,7 @@ def _search_sop_collection(query_vector: List[float], query_text: str, limit: in
             'date': point.payload.get('date', ''),
             'doc_no': point.payload.get('doc_no', ''),
             'rev': point.payload.get('rev', ''),
-            'webUrl': point.payload.get('@microsoft.graph.downloadUrl', ''),
+            'webUrl': web_url,
             'score': point.score
         })
     

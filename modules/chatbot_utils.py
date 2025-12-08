@@ -4,6 +4,8 @@ from datetime import datetime
 from modules import database
 import os
 from google import genai
+import requests
+from azure.identity import ClientSecretCredential
 
 # Confidence threshold for retrieval results
 # Reads from environment variable, defaults to 0.6
@@ -16,6 +18,81 @@ def init_gemini_client():
         st.error("GEMINI_API_KEY not found in environment variables.")
         return None
     return genai.Client(api_key=api_key)
+
+def get_onedrive_token():
+    """Get access token for Microsoft Graph API"""
+    try:
+        tenant_id = os.getenv('MS_TENANT_ID')
+        client_id = os.getenv('MS_CLIENT_ID')
+        client_secret = os.getenv('MS_CLIENT_SECRET')
+        
+        if not all([tenant_id, client_id, client_secret]):
+            print("Missing OneDrive credentials")
+            return None
+            
+        credential = ClientSecretCredential(
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=client_secret
+        )
+        token = credential.get_token("https://graph.microsoft.com/.default")
+        return token.token
+    except Exception as e:
+        print(f"Error getting OneDrive token: {e}")
+        return None
+
+def get_onedrive_download_link(filename):
+    """
+    Generate a 1-hour valid download link for a file in OneDrive.
+    Uses direct path addressing. No caching.
+    """
+    import urllib.parse
+    
+    # 1. Get Config
+    drive_id = os.getenv('ONEDRIVE_DRIVE_ID')
+    folder_path = os.getenv('SOP_FOLDER_PATH')
+    
+    if not drive_id or not folder_path:
+        return None
+
+    # 2. Get Token
+    token = get_onedrive_token()
+    if not token:
+        return None
+
+    headers = {"Authorization": f"Bearer {token}"}
+    graph_base_url = "https://graph.microsoft.com/v1.0"
+
+    try:
+        # 3. Generate Link directly by Path
+        # POST /drives/{drive-id}/root:/{path}:/createLink
+        safe_filename = urllib.parse.quote(filename)
+        # Ensure folder path doesn't end with slash to avoid double slash
+        clean_folder = folder_path.strip("/")
+        
+        link_url = f"{graph_base_url}/drives/{drive_id}/root:/{clean_folder}/{safe_filename}:/createLink"
+        
+        body = {
+            "type": "view",
+            "scope": "organization"
+        }
+        
+        response = requests.post(link_url, headers=headers, json=body)
+        
+        # If 404, maybe filename doesn't match exactly? 
+        # But user said "no need search", so we assume exact match.
+        if response.status_code == 404:
+            print(f"File not found at path: {clean_folder}/{filename}")
+            return None
+            
+        response.raise_for_status()
+        link_data = response.json()
+        
+        return link_data.get('link', {}).get('webUrl')
+            
+    except Exception as e:
+        print(f"Error generating OneDrive link: {e}")
+        return None
 
 def create_embedding(client, text: str, model: str = "models/gemini-embedding-001"):
     """Create dense embedding using Gemini"""
