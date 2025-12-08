@@ -1,6 +1,6 @@
 services:
   exim-chat:
-    build: .
+    image: ghcr.io/prb-naoby/exim-chat:latest
     container_name: exim-chat
     ports:
       - "8504:8504"
