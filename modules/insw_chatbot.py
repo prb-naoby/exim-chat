@@ -294,6 +294,16 @@ def show():
     if "edit_message_index_insw" not in st.session_state:
         st.session_state.edit_message_index_insw = None
     
+    # Sync messages from Redis to Session State
+    # This ensures we pick up the new response after background worker finishes
+    if "current_session_id" in st.session_state and st.session_state.current_session_id:
+        db_messages = database.load_chat_history("guest", "INSW", st.session_state.current_session_id)
+        # Convert to format expected by UI
+        st.session_state.messages_insw = [
+            {"role": m["role"], "content": m["content"], "timestamp": m.get("timestamp")} 
+            for m in db_messages
+        ]
+
     # Display chat history
     for idx, message in enumerate(st.session_state.messages_insw):
         chatbot_utils.render_chat_message(
@@ -327,5 +337,9 @@ def show():
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 import time
-                time.sleep(1)
-                st.rerun()
+                while True:
+                    time.sleep(1)
+                    new_status = database.get_session_status(session_id)
+                    if new_status != "processing":
+                        st.rerun()
+                        break

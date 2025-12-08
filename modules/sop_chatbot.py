@@ -512,6 +512,14 @@ def show():
     if "edit_message_index" not in st.session_state:
         st.session_state.edit_message_index = None
     
+    # Sync messages from Redis to Session State
+    if "current_session_id" in st.session_state and st.session_state.current_session_id:
+        db_messages = database.load_chat_history("guest", "SOP", st.session_state.current_session_id)
+        st.session_state.messages_sop = [
+            {"role": m["role"], "content": m["content"], "timestamp": m.get("timestamp")} 
+            for m in db_messages
+        ]
+
     # Display chat history
     for idx, message in enumerate(st.session_state.messages_sop):
         chatbot_utils.render_chat_message(
@@ -545,5 +553,9 @@ def show():
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 import time
-                time.sleep(1)
-                st.rerun()
+                while True:
+                    time.sleep(1)
+                    new_status = database.get_session_status(session_id)
+                    if new_status != "processing":
+                        st.rerun()
+                        break
