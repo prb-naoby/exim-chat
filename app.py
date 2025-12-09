@@ -46,25 +46,34 @@ def check_password():
         return True
 
     # 2. Check Cookies (Persistence)
+    # 2. Check Cookies (Persistence)
     # Note: cookie_manager.get() might return None on first render while syncing
     # We can try to use get_all() to check if manager is ready
     cookies = cookie_manager.get_all()
-    # logger.info(f"Cookies detected: {cookies}") # Too verbose for production, useful for debug
+    logger.info(f"DEBUG: Cookie Manager get_all(): {cookies}")
     
     auth_cookie = cookie_manager.get("auth_token")
+    logger.info(f"DEBUG: auth_token cookie: {auth_cookie}")
     
     if auth_cookie == "valid": 
         st.session_state.authenticated = True
         saved_session = cookie_manager.get("session_id")
+        logger.info(f"DEBUG: session_id cookie: {saved_session}")
+        
         if saved_session:
              st.session_state.current_session_id = saved_session
              logger.info(f"Session restored from cookie: {saved_session}")
+        else:
+             logger.warning("Auth valid but session_id cookie missing/None")
+             
         return True
     elif auth_cookie is None:
+        logger.info("Auth cookie is None (loading or missing)")
         # Could be loading or actually missing. 
         # If we barely started, we might want to wait?
-        # extra-streamlit-components usually handles this by triggering a re-run internally when ready.
         pass
+    else:
+        logger.info(f"Auth cookie invalid value: {auth_cookie}")
 
     # Custom CSS for the login page
     st.markdown("""

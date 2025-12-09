@@ -23,7 +23,7 @@ def get_qdrant_client():
     api_key = os.getenv('SOP_QDRANT_API_KEY')
     return QdrantClient(url=url, api_key=api_key)
 
-def _search_sop_collection(query_vector: List[float], query_text: str, limit: int = 3) -> List[Dict[str, Any]]:
+def _search_sop_collection(query_vector: List[float], query_text: str, limit: int = 3, session_id: str = None) -> List[Dict[str, Any]]:
     """Search SOP documents collection with hybrid search"""
     collection_name = os.getenv('SOP_QDRANT_COLLECTION_NAME', 'sop_documents')
     
@@ -41,12 +41,9 @@ def _search_sop_collection(query_vector: List[float], query_text: str, limit: in
     )
     
     formatted_results = []
-    import urllib.parse
     
     for point in results.points:
         # Use local trigger link for on-demand generation
-        # "dokumen" field is list of required docs, NOT the filename.
-        # "filename" field contains the source PDF filename (from ingestion).
         filename = point.payload.get('filename', '')
         
         # Fallback to webUrl if filename is missing
@@ -54,16 +51,18 @@ def _search_sop_collection(query_vector: List[float], query_text: str, limit: in
         
         if filename:
             # Create a secure local trigger link
-            # Requires current session ID from session state
-            current_sid = st.session_state.get('current_session_id')
-            if current_sid:
-                token = chatbot_utils.generate_secure_token(filename, current_sid)
+            # Use passed session_id (from background thread) or fallback to session_state (if foreground)
+            target_sid = session_id or st.session_state.get('current_session_id')
+            
+            if target_sid:
+                token = chatbot_utils.generate_secure_token(filename, target_sid)
                 if token:
                     web_url = f"/?token={token}"
                 else:
                     web_url = "#error-generating-token"
             else:
-                 # Fallback if session ID missing (shouldn't happen in authenticated app)
+                 # Fallback if session ID missing
+                 logger.warning(f"Session ID missing during link generation for {filename}. Falling back to legacy link.")
                  import urllib.parse
                  safe_filename = urllib.parse.quote(filename)
                  web_url = f"/?download_file={safe_filename}"
@@ -82,6 +81,9 @@ def _search_sop_collection(query_vector: List[float], query_text: str, limit: in
         })
     
     return formatted_results
+
+
+
 
 
 def _search_cases_collection(query_vector: List[float], query_text: str, limit: int = 2) -> List[Dict[str, Any]]:
@@ -428,7 +430,7 @@ Hanya output JSON."""
         # On error, default to empty to be safe (strict)
         return []
 
-def search_sop_exim(user_input: str) -> str:
+def search_sop_exim(user_input: str, session_id: str = None) -> str:
     """
     Main function for SOP Chatbot with multi-step guardrail RAG pipeline
     """
@@ -456,7 +458,7 @@ def search_sop_exim(user_input: str) -> str:
             query_vector = chatbot_utils.create_embedding(client, user_input)
             
             # Search both collections
-            sop_results = _search_sop_collection(query_vector, user_input, limit=3)
+            sop_results = _search_sop_collection(query_vector, user_input, limit=3, session_id=session_id)
             case_results = _search_cases_collection(query_vector, user_input, limit=2)
             
             logger.info(f"SOP Search (Attempt {retry_count+1}): Found {len(sop_results)} SOPs, {len(case_results)} Cases")
