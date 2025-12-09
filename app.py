@@ -417,7 +417,15 @@ def main():
         
         st.divider()
 
-        
+        # Logout Button
+        if st.button("🔒 Logout", use_container_width=True, key="logout_btn"):
+             # Soft Logout: Clear Auth but keep Browser ID for history persistence
+             cookie_manager.delete("auth_token")
+             st.session_state.authenticated = False
+             # Optional: clear session ID if you want them to start fresh session on login?
+             # User requested: "restored chat history" -> So keep session state or rely on browser_id restoration in check_password
+             st.rerun()
+             
         # Clear chat button
         if st.button("🗑️ Clear Chat History", use_container_width=True, key="clear_chat_btn"):
             chatbot_type = st.session_state.current_page

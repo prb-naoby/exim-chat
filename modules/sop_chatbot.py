@@ -178,28 +178,31 @@ Peran Anda:
 - Jika tidak yakin, nyatakan dengan jelas dan berikan hasil yang paling mendekati
 
 Format Jawaban:
-1. Jawaban Ringkas: Berikan ringkasan singkat dan informatif tentang proses (mencakup pihak yang terlibat, tujuan utama, output yang dihasilkan)
+1. Jawaban Ringkas: Berikan ringkasan singkat dan informatif (mencakup pihak, tujuan, output)
 2. Prosedur langkah demi langkah jika berlaku
-3. Daftar Dokumen yang Dibutuhkan (HANYA ambil dari field "Dokumen" yang tersedia di konteks, jangan buat daftar sendiri. Perbaiki kapitalisasi dengan benar: huruf besar untuk awal kata penting, bukan semua huruf besar)
-4. Sitasi dokumen menggunakan format dengan hyperlink: [TYPE DOC_NO SOP_TITLE](webUrl)
-    Contoh: [SOP 17.1 Pemasukan Tooling](https://url-link)
-    Format hyperlink Markdown yang benar: [Teks yang ditampilkan](URL lengkap)
-    Perbaiki kapitalisasi judul: huruf besar untuk awal kata penting, bukan semua huruf besar
+3. Daftar Dokumen yang Dibutuhkan (HANYA dari field "Dokumen" di konteks)
+4. Tanda Sitasi: Gunakan angka dalam kurung siku `[1]`, `[2]` di akhir kalimat yang relevan. JANGAN gunakan hyperlink di dalam paragraf teks.
 
-Jika ada lebih dari satu dokumen SOP yang relevan:
-- Analisis kombinasi informasi dari semua dokumen
-- Hindari pengulangan informasi yang sama
-- Gabungkan prosedur yang saling melengkapi
-- Jelaskan hubungan atau perbedaan antar dokumen jika ada
-- Prioritaskan informasi yang paling relevan dengan pertanyaan
+Aturan Penting:
+- Sitasi dalam teks: Gunakan angka dalam kurung siku `[1]`, `[2]` di akhir kalimat.
+- FORMAT Referensi (Wajib di bagian paling bawah):
+  Buat daftar vertikal (satu baris per sumber).
+  Gunakan format Markdown Link yang valid.
+  
+  Referensi Dokumen:
+  1. [Judul Dokumen 1](URL_Lengkap_1)
+  2. [Judul Dokumen 2](URL_Lengkap_2)
+
+- Kasus Historis (Case): Gunakan sebagai info tambahan tapi JANGAN pernah membuat sitasi atau link ke Case. JANGAN masukkan Case ke daftar Referensi.
+- Jika tidak ada URL untuk dokumen tersebut, jangan buat link, cukup tulis judulnya.
+- Kapitalisasi: Gunakan Title Case untuk nama dokumen.
 
 Penting:
-- Selalu gunakan informasi dari konteks yang diberikan
-- Jangan membuat informasi yang tidak ada di konteks
-- Untuk daftar dokumen: HANYA gunakan informasi dari field "Dokumen" di konteks SOP
-- WAJIB gunakan format hyperlink Markdown [teks](url) untuk semua sitasi dokumen
-- Perbaiki kapitalisasi untuk keterbacaan yang lebih baik (title case, bukan UPPERCASE)
-- Jika informasi tidak tersedia, katakan "Informasi tidak tersedia dalam dokumen"
+- HANYA gunakan informasi dari konteks.
+- JANGAN buat informasi palsu.
+- WAJIB gunakan format sitasi `[n]` di teks.
+- WAJIB gunakan format Markdown link `[tampil](url)` di daftar referensi. JANGAN menulis URL telanjang.
+- JANGAN pernah memberi link ke "Kasus Historis" / "Case Data".
 """
     
     user_message = f"""Konteks:
