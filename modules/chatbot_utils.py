@@ -221,6 +221,39 @@ def validate_secure_token(token, current_session_id):
         print(f"Error validating token: {e}")
         return None, "Invalid token"
 
+def render_message_content(content):
+    """
+    Render message content, handling special <CASE_DATA> blocks.
+    """
+    if "<CASE_DATA>" in content:
+        parts = content.split("<CASE_DATA>")
+        text_content = parts[0].strip()
+        case_json = parts[1].strip()
+        
+        # Render text content
+        st.markdown(text_content)
+        
+        # Render cases as table
+        try:
+            cases = json.loads(case_json)
+            if cases:
+                st.markdown("### Studi Kasus Terkait")
+                
+                # Build Markdown Table
+                table_md = "| Case No | Pertanyaan | Jawaban |\n| :--- | :--- | :--- |\n"
+                for case in cases:
+                    # Escape pipes in content to avoid breaking table
+                    q = case.get('question', '').replace('|', '\|').replace('\n', '<br>')
+                    a = case.get('answer', '').replace('|', '\|').replace('\n', '<br>')
+                    no = case.get('case_no', '')
+                    table_md += f"| #{no} | {q} | {a} |\n"
+                
+                st.markdown(table_md, unsafe_allow_html=True)
+        except Exception as e:
+            print(f"Error rendering case data: {e}")
+    else:
+        st.markdown(content)
+
 def render_chat_message(message, idx, session_key, edit_key, regen_callback):
     """
     Render a single chat message.
