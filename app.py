@@ -67,17 +67,17 @@ if not st.session_state.browser_id:
 def check_password():
     """Returns `True` if the user had the correct password."""
     # 1. Check Session State
-    if st.session_state.get("authenticated", False):
+    # Ensure BOTH authenticated and current_session_id are present
+    if st.session_state.get("authenticated", False) and st.session_state.get("current_session_id"):
         return True
 
     # 2. Check Cookies (Persistence)
     # 2. Check Cookies (Persistence)
     # Note: cookie_manager.get() might return None on first render while syncing
-    # We can try to use get_all() to check if manager is ready
-    cookies = cookie_manager.get_all()
-    logger.info(f"DEBUG: Cookie Manager get_all(): {cookies}")
+    # We avoid calling get_all() excessively as it can cause widget ID conflicts in some versions
     
     auth_cookie = cookie_manager.get("auth_token")
+    logger.info(f"DEBUG: auth_token cookie: {auth_cookie}")
     logger.info(f"DEBUG: auth_token cookie: {auth_cookie}")
     
     if auth_cookie == "valid": 

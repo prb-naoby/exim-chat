@@ -209,6 +209,13 @@ def get_last_empty_session(username, chatbot_type):
         return sid
     return None
 
+def get_last_session_id(username, chatbot_type):
+    """Get the most recent session ID for a user"""
+    user_sessions_key = f"user:{username}:sessions:{chatbot_type}"
+    # Get the one with highest score (latest timestamp)
+    last_ids = redis_client.zrevrange(user_sessions_key, 0, 0)
+    return last_ids[0] if last_ids else None
+
 # Status management for async processing
 def set_session_status(session_id, status):
     """Set session status (processing/idle)"""

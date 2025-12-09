@@ -173,15 +173,36 @@ def get_encryption_key():
     """Get or create encryption key"""
     # In production, this should be a fixed env var.
     key = os.getenv("ENCRYPTION_KEY")
-    if not key:
-        # Fallback for dev consistency: Use a fixed string if env is missing
-        # This ensures links survive restarts/refreshes even if user didn't set env
-        return "development_fallback_key_32_bytes!!"[:32] # Must be 32 URL-safe base64-encoded bytes ideally, but Fernet.generate_key() makes url-safe b64.
-        # Actually Fernet key must be 32 url-safe base64-encoded bytes.
-        # "development_fallback_key_32_bytes!!" is 33 chars.
-        # Let's use a proper base64 key hardcoded for dev.
-        return "sobnGzGhMZs-Pv77j1YZjsMrnxtV3KhmIXmipyqtrM4=" 
-    return key
+    # Fallback key (valid 32-byte base64-encoded Fernet key)
+    # User provided key must be 32 bytes and then base64 encoded
+    import base64
+    raw_key = b'iniadalahencryptionkeyuntukinswchat'.ljust(32)[:32]
+    DEFAULT_KEY = base64.urlsafe_b64encode(raw_key)
+
+    if key:
+        try:
+            # 1. Try using key as-is (assuming it's already base64 Fernet key)
+            Fernet(key.encode() if isinstance(key, str) else key)
+            return key
+        except Exception:
+            # 2. Try to fix raw string key -> Base64
+            try:
+                # Ensure 32 bytes
+                raw = key.encode() if isinstance(key, str) else key
+                padded = raw.ljust(32)[:32]
+                fixed_key = base64.urlsafe_b64encode(padded)
+                
+                # Check if fixed key works
+                Fernet(fixed_key)
+                # print(f"DEBUG: Auto-corrected raw ENCRYPTION_KEY to valid Fernet key.") # Optional debug
+                final_key = fixed_key.decode()
+                print(f"DEBUG KEY IN USE (Fixed): {final_key[:10]}... Len: {len(final_key)}") # Temporary debug
+                return final_key
+            except Exception as e:
+                print(f"WARNING: Invalid ENCRYPTION_KEY in environment ({e}). Using fallback dev key.")
+            
+    print(f"DEBUG KEY IN USE (Default): {DEFAULT_KEY[:10]}... Len: {len(DEFAULT_KEY)}")
+    return DEFAULT_KEY
 
 def generate_secure_token(filename, session_id):
     """Encrypt filename and session_id into a token"""
@@ -195,6 +216,7 @@ def generate_secure_token(filename, session_id):
         # Payload: "session_id|filename"
         payload = f"{session_id}|{filename}".encode()
         token = f.encrypt(payload).decode()
+        print(f"DEBUG: Generated NEW token for {filename} (Session: {session_id})")
         return token
     except Exception as e:
         print(f"Error generating token: {e}")
@@ -218,6 +240,12 @@ def validate_secure_token(token, current_session_id):
             
         return filename, None
     except Exception as e:
+        # InvalidToken (decryption failure) often has empty string representation
+        # We check class name or catch explicitly if imported
+        if type(e).__name__ == "InvalidToken":
+             print(f"WARNING: Token decryption failed (InvalidToken). Key might have changed.")
+             return None, "Invalid token (Decryption failed - Link might be expired or key changed)"
+        
         print(f"Error validating token: {e}")
         return None, "Invalid token"
 
