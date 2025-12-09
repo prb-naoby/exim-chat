@@ -26,12 +26,8 @@ st.set_page_config(
 )
 
 # Initialize cookie manager (must be at top level)
-# Use cache_resource to prevent re-initialization loop
-@st.cache_resource
-def get_manager():
-    return stx.CookieManager()
-
-cookie_manager = get_manager()
+# Use a fixed key to maintain component identity without caching (which fails with widgets)
+cookie_manager = stx.CookieManager(key="system_cookie_manager")
 
 # Initialize session state
 if "authenticated" not in st.session_state:
