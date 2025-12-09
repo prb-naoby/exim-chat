@@ -135,6 +135,8 @@ def get_onedrive_download_link(filename):
         logger.error(f"Error generating OneDrive link: {e}")
         return None
 
+    return None
+    
 def create_embedding(client, text: str, model: str = "models/gemini-embedding-001"):
     """Create dense embedding using Gemini"""
     try:
@@ -163,6 +165,52 @@ def create_sparse_vector(text: str):
         values.append(freq)
     
     return {"indices": indices, "values": values}
+
+# --- Security Utils ---
+from cryptography.fernet import Fernet
+
+def get_encryption_key():
+    """Get or create encryption key"""
+    # In production, this should be a fixed env var.
+    # For now, we generate one if missing, but this resets on restart.
+    # Ideally user sets ENCRYPTION_KEY in .env
+    key = os.getenv("ENCRYPTION_KEY")
+    if not key:
+        # Fallback for dev: unique per runtime if not set
+        # If persistence across restarts is needed, ENCRYPTION_KEY must be in .env
+        if "temp_key" not in st.session_state:
+             st.session_state.temp_key = Fernet.generate_key().decode()
+        return st.session_state.temp_key
+    return key
+
+def generate_secure_token(filename, session_id):
+    """Encrypt filename and session_id into a token"""
+    try:
+        key = get_encryption_key()
+        f = Fernet(key.encode())
+        # Payload: "session_id|filename"
+        payload = f"{session_id}|{filename}".encode()
+        token = f.encrypt(payload).decode()
+        return token
+    except Exception as e:
+        print(f"Error generating token: {e}")
+        return None
+
+def validate_secure_token(token, current_session_id):
+    """Decrypt token and validate session_id"""
+    try:
+        key = get_encryption_key()
+        f = Fernet(key.encode())
+        payload = f.decrypt(token.encode()).decode()
+        token_session_id, filename = payload.split("|", 1)
+        
+        if token_session_id != current_session_id:
+            return None, "Invalid session"
+            
+        return filename, None
+    except Exception as e:
+        print(f"Error validating token: {e}")
+        return None, "Invalid token"
 
 def render_message_content(content):
     """

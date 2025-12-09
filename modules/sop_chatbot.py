@@ -53,9 +53,21 @@ def _search_sop_collection(query_vector: List[float], query_text: str, limit: in
         web_url = point.payload.get('webUrl', '')
         
         if filename:
-            # Create a local link that triggers the app.py redirection logic
-            safe_filename = urllib.parse.quote(filename)
-            web_url = f"/?download_file={safe_filename}"
+            # Create a secure local trigger link
+            # Requires current session ID from session state
+            current_sid = st.session_state.get('current_session_id')
+            if current_sid:
+                from modules import chatbot_utils
+                token = chatbot_utils.generate_secure_token(filename, current_sid)
+                if token:
+                    web_url = f"/?token={token}"
+                else:
+                    web_url = "#error-generating-token"
+            else:
+                 # Fallback if session ID missing (shouldn't happen in authenticated app)
+                 import urllib.parse
+                 safe_filename = urllib.parse.quote(filename)
+                 web_url = f"/?download_file={safe_filename}"
 
         formatted_results.append({
             'sop_title': point.payload.get('sop_title', ''),

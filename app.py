@@ -2,6 +2,10 @@ import streamlit as st
 from modules import database, chatbot_utils, app_logger
 import os
 from dotenv import load_dotenv
+import extra_streamlit_components as stx
+
+# Load environment variables
+load_dotenv()
 
 # Load environment variables
 load_dotenv()
@@ -21,6 +25,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Initialize cookie manager (must be at top level)
+cookie_manager = stx.CookieManager()
+
 # Initialize session state
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -33,7 +40,18 @@ if "delete_confirm" not in st.session_state:
 
 def check_password():
     """Returns `True` if the user had the correct password."""
+    # 1. Check Session State
     if st.session_state.get("authenticated", False):
+        return True
+
+    # 2. Check Cookies (Persistence)
+    auth_cookie = cookie_manager.get("auth_token")
+    if auth_cookie == "valid": # Simple validation for now
+        st.session_state.authenticated = True
+        # Parse session_id from cookie if exists
+        saved_session = cookie_manager.get("session_id")
+        if saved_session:
+             st.session_state.current_session_id = saved_session
         return True
 
     # Custom CSS for the login page
@@ -65,6 +83,7 @@ def check_password():
         .stButton button:hover {
             background-color: #FF3333 !important;
             opacity: 1 !important;
+            border: none !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -94,6 +113,11 @@ def check_password():
                 correct_password = os.getenv("APP_PASSWORD")
                 if password == correct_password:
                     st.session_state.authenticated = True
+                    # Set Cookies
+                    cookie_manager.set("auth_token", "valid", key="set_auth")
+                    # If we have a session ID, save it too
+                    if st.session_state.current_session_id:
+                        cookie_manager.set("session_id", st.session_state.current_session_id, key="set_sid")
                     st.rerun()
                 else:
                     st.error("Password salah")
@@ -122,6 +146,9 @@ def start_new_chat():
             st.session_state.current_session_id
         )
     
+    # Update Session Cookie
+    cookie_manager.set("session_id", st.session_state.current_session_id, key="new_sid_cookie")
+    
     # Clear current messages
     if st.session_state.current_page == "INSW":
         st.session_state.messages_insw = []
@@ -134,6 +161,9 @@ def load_session(session_id, chatbot_type):
     """Load a specific chat session"""
     st.session_state.current_session_id = session_id
     st.session_state.current_page = chatbot_type
+    
+    # Update Session Cookie
+    cookie_manager.set("session_id", session_id, key="load_sid_cookie")
     
     # Load messages for this session
     messages = database.load_chat_history(
@@ -169,28 +199,55 @@ def main():
     # 1. Check for download request (Redirection)
     # Using st.query_params (Streamlit >= 1.30) or st.experimental_get_query_params
     query_params = st.query_params
-    if "download_file" in query_params:
-        filename = query_params["download_file"]
-        logger.info(f"Received download request for file: {filename}")
+    if "token" in query_params:
+        token = query_params["token"]
+        logger.info(f"Received secure download request. Token: {token[:10]}...")
         
-        # Clear param so we don't loop
-        # st.query_params.clear() # Not always safe to clear immediately if redirecting?
+        # We need the current session ID to validate the token
+        # BUT wait, if the user clicked the link, they might be in a new tab/session context?
+        # Cookies should persist the session ID.
+        # But `st.session_state` might be fresh if it's a new tab without running `check_password` first.
+        # So we MUST run check_password first to restore session ID from cookies.
+        pass # Fallthrough to auth check first
         
-        with st.spinner(f"Generating download link for {filename}..."):
-            download_url = chatbot_utils.get_onedrive_download_link(filename)
-            
-            if download_url:
-                logger.info(f"Redirecting user to download URL: {download_url}")
-                # Redirect
-                st.markdown(f'<meta http-equiv="refresh" content="0; url={download_url}">', unsafe_allow_html=True)
-                st.stop()
-            else:
-                logger.error(f"Failed to generate download link for: {filename}")
-                st.error("Failed to generate download link or file not found. Check logs for details.")
-
-    # 1. Authentication Check
+    # 2. Authentication Check (Restores Session)
     if not check_password():
         return
+        
+    # 3. Handle Token AFTER Auth (now we have `current_session_id`)
+    if "token" in query_params:
+        token = query_params["token"]
+        current_sid = st.session_state.current_session_id
+        
+        if not current_sid:
+            st.error("Session not initialized. Please try referencing the file again.")
+            st.stop()
+            
+        filename, error = chatbot_utils.validate_secure_token(token, current_sid)
+        
+        if error:
+            logger.warning(f"Token validation failed: {error}")
+            st.error(f"Download link invalid or expired: {error}")
+            st.stop()
+            
+        if filename:
+            logger.info(f"Token verified for file: {filename}")
+            # Generate the actual download link (1 hour)
+            with st.spinner(f"Generating download link for {filename}..."):
+                download_url = chatbot_utils.get_onedrive_download_link(filename)
+                
+                if download_url:
+                    logger.info(f"Redirecting user to download URL: {download_url}")
+                    st.markdown(f'<meta http-equiv="refresh" content="0; url={download_url}">', unsafe_allow_html=True)
+                    st.stop()
+                else:
+                    logger.error(f"Failed to generate download link for: {filename}")
+                    st.error("Failed to generate download link. File might not exist.")
+                    st.stop()
+
+    # Legacy: Warning for old links
+    if "download_file" in query_params:
+         st.warning("This link format is deprecated. Please ask the chatbot for the document again.")
 
 
     # Initialize messages if not exists

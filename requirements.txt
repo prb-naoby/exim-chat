@@ -8,3 +8,6 @@ pandas
 openpyxl
 python-dateutil
 redis
+redis
+cryptography
+extra-streamlit-components
