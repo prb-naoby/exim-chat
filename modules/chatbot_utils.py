@@ -221,11 +221,101 @@ def validate_secure_token(token, current_session_id):
         print(f"Error validating token: {e}")
         return None, "Invalid token"
 
-# ... (render functions unchanged) ...
+def render_chat_message(message, idx, session_key, edit_key, regen_callback):
+    """
+    Render a single chat message.
+    
+    Args:
+        message (dict): Message object {role, content, timestamp}
+        idx (int): Index in the message list
+        session_key (str): Session state key for messages (e.g., 'messages_sop')
+        edit_key (str): Session state key for edit index (e.g., 'edit_message_index')
+        regen_callback (func): Function to call for regeneration/saving
+    """
+    with st.chat_message(message["role"]):
+        # Header with timestamp
+        if "timestamp" in message:
+            st.markdown(
+                f"<div style='font-size: 0.75rem; color: #888; margin-bottom: 0.2rem;'>{message['timestamp']}</div>", 
+                unsafe_allow_html=True
+            )
+        
+        # Display Content
+        render_message_content(message["content"])
 
-# ... (run_background_generation unchanged) ...
+import threading
+import time
 
-# ... (handle_chat_input unchanged) ...
+def run_background_generation(prompt, session_key, chatbot_type, response_generator, session_id):
+    """Background worker to generate response and update Redis"""
+    try:
+        # Generate Response
+        # Pass session_id to generator so it can create secure links even in bg thread
+        try:
+            response = response_generator(prompt, session_id=session_id)
+        except TypeError:
+             # Fallback for generators that don't accept session_id
+             response = response_generator(prompt)
+             
+        assistant_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Save to Redis
+        database.save_message(
+            "guest", 
+            chatbot_type, 
+            "assistant", 
+            response,
+            session_id,
+            assistant_timestamp
+        )
+        
+        # Update status to idle (done)
+        database.set_session_status(session_id, "idle")
+        
+    except Exception as e:
+        print(f"Error in background generation: {e}")
+        database.set_session_status(session_id, "error")
+
+def handle_chat_input(prompt, session_key, chatbot_type, response_generator):
+    """
+    Handle new user input: add to state, save to db, start background generation.
+    """
+    session_id = st.session_state.current_session_id
+    user_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # 1. Add User Message to Local State (Optimistic UI)
+    st.session_state[session_key].append({
+        "role": "user", 
+        "content": prompt, 
+        "timestamp": user_timestamp
+    })
+    
+    # 2. Save User Message to Redis
+    database.save_message(
+        "guest", 
+        chatbot_type, 
+        "user", 
+        prompt,
+        session_id,
+        user_timestamp
+    )
+    
+    # 3. Update Title if first message
+    if len(st.session_state[session_key]) == 1:
+         database.update_session_title("guest", chatbot_type, session_id)
+    
+    # 4. Set Status to Processing
+    database.set_session_status(session_id, "processing")
+    
+    # 5. Start Background Thread
+    thread = threading.Thread(
+        target=run_background_generation,
+        args=(prompt, session_key, chatbot_type, response_generator, session_id)
+    )
+    thread.start()
+    
+    # 6. Rerun to show the user message and enter polling mode
+    st.rerun()
 
 def regenerate_response(idx, new_text, session_key, chatbot_type, response_generator):
     """

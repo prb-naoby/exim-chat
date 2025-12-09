@@ -2,6 +2,8 @@ import streamlit as st
 from modules import database, chatbot_utils, app_logger
 import os
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
+import uuid
 import extra_streamlit_components as stx
 
 # Load environment variables
@@ -64,7 +66,15 @@ def check_password():
              st.session_state.current_session_id = saved_session
              logger.info(f"Session restored from cookie: {saved_session}")
         else:
-             logger.warning("Auth valid but session_id cookie missing/None")
+             logger.warning("Auth valid but session_id cookie missing/None. Generating new session.")
+             # Auto-recover: Generate new session ID
+             import uuid
+             new_sid = str(uuid.uuid4())
+             st.session_state.current_session_id = new_sid
+             cookie_manager.set("session_id", new_sid, expires_at=datetime.now() + timedelta(days=7))
+             
+             # Also ensure empty chat session exists in DB
+             database.create_empty_session("guest", "SOP", new_sid)
              
         return True
     elif auth_cookie is None:
