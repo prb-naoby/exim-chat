@@ -57,10 +57,12 @@ def get_onedrive_download_link(filename):
     folder_path = os.getenv('SOP_FOLDER_PATH')
     
     if not drive_id or not folder_path:
+        print("Missing OneDrive drive_id or folder_path")
         return None
 
     token = get_onedrive_token()
     if not token:
+        print("Failed to obtain OneDrive token")
         return None
 
     headers = {"Authorization": f"Bearer {token}"}
@@ -69,21 +71,43 @@ def get_onedrive_download_link(filename):
     try:
         # 3. Search for File
         # We search specifically in the SOP folder
-        search_url = f"{graph_base_url}/drives/{drive_id}/root:/{folder_path}:/search(q='{filename}')"
+        # Encode keys to handle spaces (e.g., "SoP dan IK")
+        import urllib.parse
+        encoded_path = urllib.parse.quote(folder_path)
+        # Search query might need encoding too if it has special chars? 
+        # But requests handles params usually. Graph API search string needs single quotes.
+        # Let's try to search the entire drive if folder search is tricky, or ensure path format.
+        # Graph API syntax: /drives/{drive-id}/root:/{path-relative-to-root}:/search(q='{search-text}')
+        
+        # Robust path construction
+        search_url = f"{graph_base_url}/drives/{drive_id}/root:/{encoded_path}:/search(q='{filename}')"
+        
+        print(f"Searching OneDrive: {search_url}")
         response = requests.get(search_url, headers=headers)
-        response.raise_for_status()
+        if response.status_code != 200:
+            print(f"OneDrive Search Failed: {response.status_code} - {response.text}")
+            return None
+            
         data = response.json()
+        print(f"OneDrive Search Results: Found {len(data.get('value', []))} items for '{filename}'")
 
         download_url = None
         # Find exact match or best match
         for item in data.get('value', []):
-            if filename in item['name']:
+            item_name = item.get('name', '')
+            print(f"  Checking item: {item_name}")
+            
+            # Case-insensitive check and looser matching
+            if filename.lower().strip() in item_name.lower().strip() or \
+               item_name.lower().strip() in filename.lower().strip():
                 # Get the temporary download URL directly
                 download_url = item.get('@microsoft.graph.downloadUrl')
-                break
+                if download_url:
+                    print(f"  Match found! Download URL retrieved.")
+                    break
         
         if not download_url:
-            print(f"File not found or no download URL: {filename}")
+            print(f"File not found or no download URL for: {filename}")
             return None
 
         # 5. Cache in Redis
