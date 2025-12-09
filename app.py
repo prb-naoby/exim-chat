@@ -40,6 +40,29 @@ if "current_session_id" not in st.session_state:
     st.session_state.current_session_id = None
 if "delete_confirm" not in st.session_state:
     st.session_state.delete_confirm = None
+if "browser_id" not in st.session_state:
+    st.session_state.browser_id = None
+
+# Initialize Browser ID (for private history)
+# Try to get from cookie first
+if st.session_state.browser_id is None:
+    # Use get_all() to check if manager is ready first implicitly
+    all_cookies = cookie_manager.get_all()
+    browser_id = cookie_manager.get("browser_id")
+    
+    if not browser_id:
+        if all_cookies is not None: # Manager is ready but cookie missing
+            browser_id = str(uuid.uuid4())
+            cookie_manager.set("browser_id", browser_id, expires_at=datetime.now() + timedelta(days=365))
+            st.session_state.browser_id = browser_id
+    else:
+        st.session_state.browser_id = browser_id
+        
+# If still None (manager loading), we might need to wait or use a temp fallback?
+# Usually extra_streamlit_components will trigger rerun once loaded.
+# Fallback for now to prevent NoneType errors if accessed
+if not st.session_state.browser_id:
+   st.session_state.browser_id = "guest" 
 
 def check_password():
     """Returns `True` if the user had the correct password."""
@@ -66,15 +89,23 @@ def check_password():
              st.session_state.current_session_id = saved_session
              logger.info(f"Session restored from cookie: {saved_session}")
         else:
-             logger.warning("Auth valid but session_id cookie missing/None. Generating new session.")
-             # Auto-recover: Generate new session ID
-             import uuid
-             new_sid = str(uuid.uuid4())
-             st.session_state.current_session_id = new_sid
-             cookie_manager.set("session_id", new_sid, expires_at=datetime.now() + timedelta(days=7))
-             
-             # Also ensure empty chat session exists in DB
-             database.create_empty_session("guest", "SOP", new_sid)
+             logger.warning("Auth valid but session_id cookie missing/None. Attempting restoration.")
+             # Auto-recover: Try to restore last session first
+             username = st.session_state.get("browser_id", "guest")
+             last_sid = database.get_last_session_id(username, "SOP")
+             if last_sid:
+                 st.session_state.current_session_id = last_sid
+                 logger.info(f"Auto-recovered last session for {username}: {last_sid}")
+             else:
+                 # Generate new session ID
+                 import uuid
+                 new_sid = str(uuid.uuid4())
+                 st.session_state.current_session_id = new_sid
+                 # Also ensure empty chat session exists in DB
+                 database.create_empty_session(username, "SOP", new_sid)
+                 logger.info(f"Created new session during recovery for {username}: {new_sid}")
+                 
+             cookie_manager.set("session_id", st.session_state.current_session_id, expires_at=datetime.now() + timedelta(days=7))
              
         return True
     elif auth_cookie is None:
@@ -145,12 +176,27 @@ def check_password():
                 correct_password = os.getenv("APP_PASSWORD")
                 if password == correct_password:
                     st.session_state.authenticated = True
-                    # Set Cookies
-                    cookie_manager.set("auth_token", "valid", key="set_auth")
+                    # Set Cookies with Expiry to prevent logout on refresh
+                    expires = datetime.now() + timedelta(days=7)
+                    cookie_manager.set("auth_token", "valid", expires_at=expires, key="set_auth")
                     
-                    # If we have a session ID waiting, save it
-                    if st.session_state.current_session_id:
-                        cookie_manager.set("session_id", st.session_state.current_session_id, key="set_sid")
+                    # Session Restoration Logic: Persist history until cleared
+                    if not st.session_state.current_session_id:
+                        # Try to restore last active session for this browser
+                        username = st.session_state.get("browser_id", "guest")
+                        last_sid = database.get_last_session_id(username, "SOP")
+                        if last_sid:
+                            st.session_state.current_session_id = last_sid
+                            logger.info(f"Restoring last active session on login for {username}: {last_sid}")
+                        else:
+                            # Create new if none exists
+                            import uuid
+                            new_sid = str(uuid.uuid4())
+                            st.session_state.current_session_id = new_sid
+                            database.create_empty_session(username, "SOP", new_sid)
+                            logger.info(f"Creating new session on login for {username}: {new_sid}")
+
+                    cookie_manager.set("session_id", st.session_state.current_session_id, expires_at=expires, key="set_sid")
                         
                     logger.info("User logged in successfully")
                     st.rerun()

@@ -180,7 +180,7 @@ def get_encryption_key():
         # Actually Fernet key must be 32 url-safe base64-encoded bytes.
         # "development_fallback_key_32_bytes!!" is 33 chars.
         # Let's use a proper base64 key hardcoded for dev.
-        return "7oJD1lH5_valid_fernet_key_base64_usage_32=" 
+        return "sobnGzGhMZs-Pv77j1YZjsMrnxtV3KhmIXmipyqtrM4=" 
     return key
 
 def generate_secure_token(filename, session_id):
@@ -279,7 +279,7 @@ def render_chat_message(message, idx, session_key, edit_key, regen_callback):
 import threading
 import time
 
-def run_background_generation(prompt, session_key, chatbot_type, response_generator, session_id):
+def run_background_generation(prompt, session_key, chatbot_type, response_generator, session_id, username):
     """Background worker to generate response and update Redis"""
     try:
         # Generate Response
@@ -294,7 +294,7 @@ def run_background_generation(prompt, session_key, chatbot_type, response_genera
         
         # Save to Redis
         database.save_message(
-            "guest", 
+            username, 
             chatbot_type, 
             "assistant", 
             response,
@@ -315,6 +315,8 @@ def handle_chat_input(prompt, session_key, chatbot_type, response_generator):
     """
     session_id = st.session_state.current_session_id
     user_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # Use browser_id if available, else fallback to guest (shouldn't happen if setup correctly)
+    username = st.session_state.get("browser_id", "guest")
 
     # 1. Add User Message to Local State (Optimistic UI)
     st.session_state[session_key].append({
@@ -325,7 +327,7 @@ def handle_chat_input(prompt, session_key, chatbot_type, response_generator):
     
     # 2. Save User Message to Redis
     database.save_message(
-        "guest", 
+        username, 
         chatbot_type, 
         "user", 
         prompt,
@@ -335,7 +337,7 @@ def handle_chat_input(prompt, session_key, chatbot_type, response_generator):
     
     # 3. Update Title if first message
     if len(st.session_state[session_key]) == 1:
-         database.update_session_title("guest", chatbot_type, session_id)
+         database.update_session_title(username, chatbot_type, session_id)
     
     # 4. Set Status to Processing
     database.set_session_status(session_id, "processing")
@@ -343,7 +345,7 @@ def handle_chat_input(prompt, session_key, chatbot_type, response_generator):
     # 5. Start Background Thread
     thread = threading.Thread(
         target=run_background_generation,
-        args=(prompt, session_key, chatbot_type, response_generator, session_id)
+        args=(prompt, session_key, chatbot_type, response_generator, session_id, username)
     )
     thread.start()
     
@@ -354,6 +356,8 @@ def regenerate_response(idx, new_text, session_key, chatbot_type, response_gener
     """
     Logic to update a user message and regenerate the response.
     """
+    username = st.session_state.get("browser_id", "guest")
+    
     # 1. Update User Message
     st.session_state[session_key][idx]["content"] = new_text
     st.session_state[session_key][idx]["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -380,10 +384,10 @@ def regenerate_response(idx, new_text, session_key, chatbot_type, response_gener
     
     # 5. Update DB
     database.save_message(
-        "guest", chatbot_type, "user", new_text, st.session_state.current_session_id, st.session_state[session_key][idx]["timestamp"]
+        username, chatbot_type, "user", new_text, st.session_state.current_session_id, st.session_state[session_key][idx]["timestamp"]
     )
     database.save_message(
-        "guest", chatbot_type, "assistant", response, st.session_state.current_session_id, assistant_timestamp
+        username, chatbot_type, "assistant", response, st.session_state.current_session_id, assistant_timestamp
     )
     
     st.rerun()
