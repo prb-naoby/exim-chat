@@ -171,6 +171,8 @@ def main():
     query_params = st.query_params
     if "download_file" in query_params:
         filename = query_params["download_file"]
+        logger.info(f"Received download request for file: {filename}")
+        
         # Clear param so we don't loop
         # st.query_params.clear() # Not always safe to clear immediately if redirecting?
         
@@ -178,11 +180,13 @@ def main():
             download_url = chatbot_utils.get_onedrive_download_link(filename)
             
             if download_url:
+                logger.info(f"Redirecting user to download URL: {download_url}")
                 # Redirect
                 st.markdown(f'<meta http-equiv="refresh" content="0; url={download_url}">', unsafe_allow_html=True)
                 st.stop()
             else:
-                st.error("Failed to generate download link or file not found.")
+                logger.error(f"Failed to generate download link for: {filename}")
+                st.error("Failed to generate download link or file not found. Check logs for details.")
 
     # 1. Authentication Check
     if not check_password():

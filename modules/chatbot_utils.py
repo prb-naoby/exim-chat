@@ -56,13 +56,16 @@ def get_onedrive_download_link(filename):
     drive_id = os.getenv('ONEDRIVE_DRIVE_ID')
     folder_path = os.getenv('SOP_FOLDER_PATH')
     
+    import logging
+    logger = logging.getLogger("app_logger") # Get the shared logger
+
     if not drive_id or not folder_path:
-        print("Missing OneDrive drive_id or folder_path")
+        logger.error("Missing OneDrive drive_id or folder_path")
         return None
 
     token = get_onedrive_token()
     if not token:
-        print("Failed to obtain OneDrive token")
+        logger.error("Failed to obtain OneDrive token")
         return None
 
     headers = {"Authorization": f"Bearer {token}"}
@@ -70,55 +73,67 @@ def get_onedrive_download_link(filename):
 
     try:
         # 3. Search for File
-        # We search specifically in the SOP folder
-        # Encode keys to handle spaces (e.g., "SoP dan IK")
         import urllib.parse
         encoded_path = urllib.parse.quote(folder_path)
-        # Search query might need encoding too if it has special chars? 
-        # But requests handles params usually. Graph API search string needs single quotes.
-        # Let's try to search the entire drive if folder search is tricky, or ensure path format.
-        # Graph API syntax: /drives/{drive-id}/root:/{path-relative-to-root}:/search(q='{search-text}')
         
-        # Robust path construction
+        logger.info(f"Generating download link for: '{filename}' in '{folder_path}'")
+        
+        # Construct search URL
         search_url = f"{graph_base_url}/drives/{drive_id}/root:/{encoded_path}:/search(q='{filename}')"
+        logger.info(f"OneDrive Search URL: {search_url}")
         
-        print(f"Searching OneDrive: {search_url}")
         response = requests.get(search_url, headers=headers)
         if response.status_code != 200:
-            print(f"OneDrive Search Failed: {response.status_code} - {response.text}")
+            logger.error(f"OneDrive Search Failed: {response.status_code} - {response.text}")
             return None
             
         data = response.json()
-        print(f"OneDrive Search Results: Found {len(data.get('value', []))} items for '{filename}'")
+        item_count = len(data.get('value', []))
+        logger.info(f"Found {item_count} items")
 
-        download_url = None
+        found_item_id = None
         # Find exact match or best match
         for item in data.get('value', []):
             item_name = item.get('name', '')
-            print(f"  Checking item: {item_name}")
+            logger.info(f"  Candidate: {item_name}")
             
             # Case-insensitive check and looser matching
             if filename.lower().strip() in item_name.lower().strip() or \
                item_name.lower().strip() in filename.lower().strip():
-                # Get the temporary download URL directly
-                download_url = item.get('@microsoft.graph.downloadUrl')
-                if download_url:
-                    print(f"  Match found! Download URL retrieved.")
-                    break
+                found_item_id = item.get('id')
+                logger.info(f"  Match matching item ID: {found_item_id}")
+                break
         
-        if not download_url:
-            print(f"File not found or no download URL for: {filename}")
+        if not found_item_id:
+            logger.warning(f"File not found or no matching item for: {filename}")
             return None
 
-        # 5. Cache in Redis
-        database.redis_client.setex(cache_key, 3599, download_url)
-        return download_url
+        # 4. Fetch Item Details explicitly to get downloadUrl
+        item_url = f"{graph_base_url}/drives/{drive_id}/items/{found_item_id}"
+        logger.info(f"Fetching item details: {item_url}")
+        
+        item_response = requests.get(item_url, headers=headers)
+        if item_response.status_code == 200:
+            item_data = item_response.json()
+            download_url = item_data.get('@microsoft.graph.downloadUrl')
+            
+            if download_url:
+                logger.info(f"  Download URL retrieved successfully.")
+                # 5. Cache in Redis
+                database.redis_client.setex(cache_key, 3599, download_url)
+                return download_url
+            else:
+                logger.error("  Item found but no @microsoft.graph.downloadUrl property present.")
+                # Fallback: Try createLink?
+                # For now return None as requested "msgraph download url" usually implies this one.
+        else:
+             logger.error(f"Failed to fetch item details: {item_response.status_code}")
+
+        return None
             
     except Exception as e:
-        print(f"Error generating OneDrive link: {e}")
+        logger.error(f"Error generating OneDrive link: {e}")
         return None
-    
-    return None
 
 def create_embedding(client, text: str, model: str = "models/gemini-embedding-001"):
     """Create dense embedding using Gemini"""
