@@ -1,7 +1,7 @@
 # =============================================================================
-# EXIM Chat - Docker Compose (Using GHCR Images)
+# EXIM Chat - Production Docker Compose (Using GHCR Images)
 # =============================================================================
-# Usage: docker-compose up -d
+# Usage: docker-compose -f docker-compose.prod.yml up -d
 # =============================================================================
 
 services:

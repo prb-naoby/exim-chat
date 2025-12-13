@@ -19,9 +19,9 @@ async def lifespan(app: FastAPI):
     if not admin_user:
         print("Creating default admin user...")
         # Default password for admin - SHOULD BE CHANGED IN PRODUCTION
-        admin_pwd = auth_utils.get_password_hash("admin123") 
+        admin_pwd = auth_utils.get_password_hash("cGFzc3dvcmRhZG1pbmV4aW0=") 
         database.add_user("admin", admin_pwd, "admin")
-        print("Admin user created (username: admin, password: admin123)")
+        print("Admin user created (username: admin, password: cGFzc3dvcmRhZG1pbmV4aW0=)")
     
     # Start ingestion scheduler
     print("Starting ingestion scheduler...")
