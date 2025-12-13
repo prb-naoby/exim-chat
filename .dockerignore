@@ -1,11 +1,73 @@
+# =========================
+# Git / Version Control
+# =========================
 .git
 .gitignore
+
+# =========================
+# Environment (Secrets)
+# =========================
 .env
+.env.*
+!.env.example
+
+# =========================
+# Python Virtual Environment
+# =========================
 .venv
+venv
+ENV
+
+# =========================
+# Python Cache
+# =========================
 __pycache__
-logs
-tests
 *.pyc
 *.pyo
 *.pyd
 .pytest_cache
+
+# =========================
+# Logs (will be created at runtime)
+# =========================
+logs
+*.log
+
+# =========================
+# Tests (not needed in production)
+# =========================
+tests
+
+# =========================
+# IDE / Editor
+# =========================
+.vscode
+.idea
+
+# =========================
+# OS Generated
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Frontend Build Cache (will be built in Docker)
+# =========================
+frontend/node_modules
+frontend/.next
+
+# =========================
+# Data (mounted as volume)
+# =========================
+data
+
+# =========================
+# Documentation
+# =========================
+*.md
+!README.md
+
+# =========================
+# Agent Artifacts
+# =========================
+.agent
