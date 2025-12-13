@@ -113,12 +113,10 @@ def get_onedrive_download_link(filename, chatbot_type=None):
     # Iterate through folders and return the first valid link found
     for folder_path in folders_to_check:
         try:
-            # logger.info(f"Checking for file '{filename}' in '{folder_path}'...")
-            
-            # Format: /drives/{drive_id}/root:/{folder}/{filename}?select=id,name,@microsoft.graph.downloadUrl
             encoded_filename = urllib.parse.quote(filename)
             encoded_folder = urllib.parse.quote(folder_path)
             
+            # Try direct path first
             direct_url = (
                 f"{graph_base_url}/drives/{drive_id}/root:/{encoded_folder}/{encoded_filename}"
                 f"?select=id,name,@microsoft.graph.downloadUrl"
@@ -132,21 +130,31 @@ def get_onedrive_download_link(filename, chatbot_type=None):
                 
                 if download_url:
                     logger.info(f"Download URL FOUND for '{filename}' in '{folder_path}'")
-                    logger.info(f"Generated Direct URL: {download_url[:100]}...")
                     return download_url
+            
             elif response.status_code == 404:
-                # Debug: List files in this folder to see if we missed it due to encoding/casing
-                logger.info(f"DEBUG: File not found in '{folder_path}'. Listing contents to find match...")
+                # Fallback: List folder contents and do case-insensitive search
+                logger.info(f"Direct lookup failed. Trying folder search for '{filename}'...")
                 try:
-                    # Just list names to debug
-                    list_url = f"{graph_base_url}/drives/{drive_id}/root:/{encoded_folder}:/children?select=name"
+                    list_url = f"{graph_base_url}/drives/{drive_id}/root:/{encoded_folder}:/children?select=name,@microsoft.graph.downloadUrl"
                     list_res = requests.get(list_url, headers=headers)
+                    
                     if list_res.status_code == 200:
-                        files = [f['name'] for f in list_res.json().get('value', [])]
-                        logger.info(f"DEBUG: Contents of '{folder_path}': {files}")
+                        files = list_res.json().get('value', [])
+                        filename_lower = filename.lower()
+                        
+                        for f in files:
+                            if f.get('name', '').lower() == filename_lower:
+                                download_url = f.get('@microsoft.graph.downloadUrl')
+                                if download_url:
+                                    logger.info(f"Fallback: Found '{f['name']}' via folder listing")
+                                    return download_url
+                        
+                        # Log available files for debugging
+                        file_names = [f['name'] for f in files]
+                        logger.info(f"Files in '{folder_path}': {file_names[:10]}...")
                 except Exception as e:
                     logger.error(f"Failed to list folder: {e}")
-
                 continue
             else:
                 logger.warning(f"OneDrive error for '{filename}' in '{folder_path}': {response.status_code}")
