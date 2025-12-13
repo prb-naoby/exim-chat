@@ -7,7 +7,8 @@ services:
       - "3000:3000"
     environment:
       - MODE=frontend
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://exim-chat-backend:3333}
+      # Backend URL for server-side proxy (Docker internal DNS)
+      - BACKEND_URL=http://exim-chat-backend:3333
       - TZ=Asia/Jakarta
     networks:
       - default

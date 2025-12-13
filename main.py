@@ -37,18 +37,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="EXIM Chat API", lifespan=lifespan)
 
 # CORS Configuration
-origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:3001",
-    "http://127.0.0.1:3001",
-    "http://localhost:3002",
-    "http://127.0.0.1:3002",
-]
+# Allow configurable origins via environment, or allow all for Docker
+cors_origins_env = os.getenv("CORS_ORIGINS", "*")
+if cors_origins_env == "*":
+    origins = ["*"]
+else:
+    origins = [origin.strip() for origin in cors_origins_env.split(",")]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"https?://.*",  # Allow any origin as fallback
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

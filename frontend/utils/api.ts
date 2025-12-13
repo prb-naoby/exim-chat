@@ -1,5 +1,8 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
+// API utility - uses proxy route to reach backend via Docker DNS
 
+// Use the proxy endpoint (same origin as frontend)
+// The Next.js server proxies to the backend via Docker internal DNS
+export const API_URL = '/api/proxy';
 
 export async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
@@ -19,7 +22,7 @@ export async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   };
 
   try {
-    // console.log(`[Fetch] Requesting: ${API_URL}${endpoint}`);
+    // All requests go through the proxy: /api/proxy/auth/token, /api/proxy/chat/sop, etc.
     const response = await fetch(`${API_URL}${endpoint}`, config);
 
     if (response.status === 401) {
