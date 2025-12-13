@@ -1,63 +1,72 @@
+version: '3.8'
+
 services:
-  exim-chat:
-    image: ghcr.io/prb-naoby/exim-chat:latest
-    container_name: exim-chat
+  backend:
+    build: .
+    container_name: exim-backend
     ports:
       - "3333:3333"
     volumes:
       - exim_data:/app/data
-      - exim_logs:/app/logs
+      - ./logs:/app/logs
     environment:
-      # Redis Config
-      - REDIS_HOST=${REDIS_HOST}
-      - REDIS_PORT=${REDIS_PORT}
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      # API Keys
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - APP_PASSWORD=${APP_PASSWORD}
-      # Qdrant Configuration
       - INSW_QDRANT_URL=${INSW_QDRANT_URL}
       - INSW_QDRANT_API_KEY=${INSW_QDRANT_API_KEY}
       - INSW_QDRANT_COLLECTION_NAME=${INSW_QDRANT_COLLECTION_NAME}
       - SOP_QDRANT_URL=${SOP_QDRANT_URL}
       - SOP_QDRANT_API_KEY=${SOP_QDRANT_API_KEY}
       - SOP_QDRANT_COLLECTION_NAME=${SOP_QDRANT_COLLECTION_NAME}
-      - CASES_QDRANT_URL=${CASES_QDRANT_URL}
-      - CASES_QDRANT_API_KEY=${CASES_QDRANT_API_KEY}
       - CASES_QDRANT_COLLECTION_NAME=${CASES_QDRANT_COLLECTION_NAME}
-      - GENERAL_QDRANT_COLLECTION_NAME=${GENERAL_QDRANT_COLLECTION_NAME}
       - CONFIDENCE_THRESHOLD=${CONFIDENCE_THRESHOLD}
-      # LLM Config
       - LLM_MODEL=${LLM_MODEL}
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
-      - VECTOR_SIZE=${VECTOR_SIZE}
-      # OneDrive Config
+      - SOP_FOLDER_PATH=${SOP_FOLDER_PATH}
+      - GENERAL_FOLDER_PATH=${GENERAL_FOLDER_PATH}
+      - CASES_FOLDER_PATH=${CASES_FOLDER_PATH}
       - ONEDRIVE_DRIVE_ID=${ONEDRIVE_DRIVE_ID}
       - MS_TENANT_ID=${MS_TENANT_ID}
       - MS_CLIENT_ID=${MS_CLIENT_ID}
       - MS_CLIENT_SECRET=${MS_CLIENT_SECRET}
-      # Folder Paths (keep original names for OneDrive compatibility)
-      - SOP_FOLDER_PATH=${SOP_FOLDER_PATH}
-      - INSW_FOLDER_PATH=${INSW_FOLDER_PATH}
-      - CASES_FOLDER_PATH=${CASES_FOLDER_PATH}
-      - GENERAL_FOLDER_PATH=${GENERAL_FOLDER_PATH}
-      # Security
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      # Timezone
+      - CASES_QDRANT_URL=${CASES_QDRANT_URL}
+      - CASES_QDRANT_API_KEY=${CASES_QDRANT_API_KEY}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
+      - VECTOR_SIZE=${VECTOR_SIZE}
+      - INSW_FOLDER_PATH=${INSW_FOLDER_PATH}
+      - GENERAL_QDRANT_COLLECTION_NAME=${GENERAL_QDRANT_COLLECTION_NAME}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
       - TZ=Asia/Jakarta
     networks:
-      - default
+      - exim_network
       - redis
       - nginx-network
-    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 3333 --reload
+
+  frontend:
+    build: ./frontend
+    container_name: exim-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:3333
+      - TZ=Asia/Jakarta
+    networks:
+      - exim_network
+    depends_on:
+      - backend
 
 volumes:
   exim_data:
-  exim_logs:
 
 
 networks:
-  default:
+  exim_network:
     name: exim_network
   redis:
     external: true
