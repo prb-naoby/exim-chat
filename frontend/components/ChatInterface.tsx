@@ -121,13 +121,14 @@ export function ChatInterface({ chatbotType, sessionId, initialMessages, onMessa
                         // eslint-disable-next-line @typescript-eslint/no-unused-vars
                         a: ({ node, ...props }) => {
                             const href = props.href || '';
-                            const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
+                            // Use proxy route for all backend API calls
+                            const API_PROXY = '/api/proxy';
 
                             // Handle /download-link?filename=xxx URLs - use fetch+blob for correct filename
                             if (href.startsWith('/download-link?')) {
                                 const urlParams = new URLSearchParams(href.split('?')[1] || '');
                                 const filename = decodeURIComponent(urlParams.get('filename') || 'download');
-                                const fullHref = `${API_URL}${href}`;
+                                const fullHref = `${API_PROXY}${href}`;
 
                                 const handleDownload = (e: React.MouseEvent) => {
                                     e.preventDefault();
@@ -152,7 +153,7 @@ export function ChatInterface({ chatbotType, sessionId, initialMessages, onMessa
 
                             // Handle legacy /download/{token} URLs - also use fetch+blob
                             if (href.startsWith('/download/')) {
-                                const fullHref = `${API_URL}${href}`;
+                                const fullHref = `${API_PROXY}${href}`;
 
                                 const handleDownload = (e: React.MouseEvent) => {
                                     e.preventDefault();
