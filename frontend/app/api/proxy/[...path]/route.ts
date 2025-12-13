@@ -32,6 +32,10 @@ async function proxyRequest(request: NextRequest, method: string) {
 
         const targetUrl = `${BACKEND_URL}${path}${search}`;
 
+        console.log(`[Proxy] ${method} ${path}${search}`);
+        console.log(`[Proxy] Target: ${targetUrl}`);
+        console.log(`[Proxy] Has Authorization: ${request.headers.has('authorization')}`);
+
         // Forward headers (except host)
         const headers = new Headers();
         request.headers.forEach((value, key) => {

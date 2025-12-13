@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { API_URL } from '@/utils/api';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -39,7 +38,7 @@ export default function SignupPage() {
         setLoading(true);
 
         try {
-            const res = await fetch(`${API_URL}/auth/register`, {
+            const res = await fetch('/api/proxy/auth/register', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

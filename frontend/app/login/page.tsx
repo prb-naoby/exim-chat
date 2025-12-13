@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { fetchAPI, API_URL } from '@/utils/api';
+import { fetchAPI } from '@/utils/api';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -23,12 +23,12 @@ export default function LoginPage() {
         setLoading(true);
 
         try {
-            // Authenticate
+            // Authenticate via proxy
             const params = new URLSearchParams();
             params.append('username', username);
             params.append('password', password);
 
-            const res = await fetch(`${API_URL}/auth/token`, {
+            const res = await fetch('/api/proxy/auth/token', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',

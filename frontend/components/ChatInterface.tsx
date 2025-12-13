@@ -124,19 +124,43 @@ export function ChatInterface({ chatbotType, sessionId, initialMessages, onMessa
                             // Use proxy route for all backend API calls
                             const API_PROXY = '/api/proxy';
 
-                            // Handle /download-link?filename=xxx URLs - use fetch+blob for correct filename
+                            // Handle /download-link?filename=xxx URLs - use fetch+blob for authenticated download
                             if (href.startsWith('/download-link?')) {
                                 const urlParams = new URLSearchParams(href.split('?')[1] || '');
                                 const filename = decodeURIComponent(urlParams.get('filename') || 'download');
                                 const fullHref = `${API_PROXY}${href}`;
 
-                                const handleDownload = (e: React.MouseEvent) => {
+                                const handleDownload = async (e: React.MouseEvent) => {
                                     e.preventDefault();
-                                    // Append timestamp to prevent browser from using cached Redirects
-                                    // This forces it to hit the backend Proxy again
-                                    const cacheBuster = `&_t=${Date.now()}`;
-                                    const finalUrl = fullHref + cacheBuster;
-                                    window.location.href = finalUrl;
+                                    try {
+                                        // Get token from localStorage
+                                        const token = localStorage.getItem('token');
+
+                                        // Fetch with Authorization header
+                                        const response = await fetch(fullHref, {
+                                            headers: {
+                                                'Authorization': token ? `Bearer ${token}` : '',
+                                            },
+                                        });
+
+                                        if (!response.ok) {
+                                            throw new Error(`Download failed: ${response.status}`);
+                                        }
+
+                                        // Create blob and download
+                                        const blob = await response.blob();
+                                        const url = window.URL.createObjectURL(blob);
+                                        const a = document.createElement('a');
+                                        a.href = url;
+                                        a.download = filename;
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        document.body.removeChild(a);
+                                        window.URL.revokeObjectURL(url);
+                                    } catch (error) {
+                                        console.error('Download error:', error);
+                                        alert('Failed to download file. Please try again.');
+                                    }
                                 };
 
                                 return (
@@ -154,11 +178,38 @@ export function ChatInterface({ chatbotType, sessionId, initialMessages, onMessa
                             // Handle legacy /download/{token} URLs - also use fetch+blob
                             if (href.startsWith('/download/')) {
                                 const fullHref = `${API_PROXY}${href}`;
+                                // Extract filename from URL path
+                                const pathParts = href.split('/');
+                                const filename = pathParts[pathParts.length - 1] || 'download';
 
-                                const handleDownload = (e: React.MouseEvent) => {
+                                const handleDownload = async (e: React.MouseEvent) => {
                                     e.preventDefault();
-                                    const cacheBuster = `?_t=${Date.now()}`; // URL might not have params yet
-                                    window.location.href = fullHref + cacheBuster;
+                                    try {
+                                        const token = localStorage.getItem('token');
+
+                                        const response = await fetch(fullHref, {
+                                            headers: {
+                                                'Authorization': token ? `Bearer ${token}` : '',
+                                            },
+                                        });
+
+                                        if (!response.ok) {
+                                            throw new Error(`Download failed: ${response.status}`);
+                                        }
+
+                                        const blob = await response.blob();
+                                        const url = window.URL.createObjectURL(blob);
+                                        const a = document.createElement('a');
+                                        a.href = url;
+                                        a.download = filename;
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        document.body.removeChild(a);
+                                        window.URL.revokeObjectURL(url);
+                                    } catch (error) {
+                                        console.error('Download error:', error);
+                                        alert('Failed to download file. Please try again.');
+                                    }
                                 };
 
                                 return (
@@ -172,6 +223,7 @@ export function ChatInterface({ chatbotType, sessionId, initialMessages, onMessa
                                     </a>
                                 );
                             }
+
 
                             return <a {...props} href={href} className="text-foreground underline hover:no-underline font-medium" target="_blank" rel="noopener noreferrer" />;
                         },
