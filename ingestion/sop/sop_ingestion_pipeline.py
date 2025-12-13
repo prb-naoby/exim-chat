@@ -9,6 +9,7 @@ Workflow:
 """
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import os
 
 from .sop_parser import SOPParser
@@ -83,7 +84,7 @@ class SOPIngestionPipeline:
             'upserted': [],
             'skipped': [],
             'errors': [],
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': datetime.now(ZoneInfo("Asia/Jakarta")).isoformat(),
             'dry_run': dry_run
         }
         

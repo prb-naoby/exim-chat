@@ -107,7 +107,7 @@ class TestChatbotLogic(unittest.TestCase):
         
         # Test 1: Short input guardrail
         result_short = insw_chatbot.search_insw_regulation("a")
-        self.assertIn("minimal 2 karakter", result_short)
+        self.assertIn("lebih spesifik", result_short)
         
         # Test 2: HS Code auto-detection logic
         # We need to mock create_embedding and search_hybrid to verify the query transformation

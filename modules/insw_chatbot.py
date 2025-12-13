@@ -1,6 +1,7 @@
-import streamlit as st
+
 from modules import database, chatbot_utils
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import os
 from ingestion.insw.insw_qdrant_store import INSWQdrantStore
@@ -153,13 +154,10 @@ def search_insw_regulation(user_input):
     """
     Search INSW regulations using hybrid search (dense + sparse)
     """
-    # Standard footer for all responses
-    footer_link = "\n\n---\nUntuk informasi lebih lanjut atau pencarian manual, silakan kunjungi https://insw.go.id/intr"
-    
     try:
         # Guardrail: Check for very short/empty input
         if not user_input or len(user_input.strip()) < 2:
-            return "Mohon masukkan kata kunci yang lebih spesifik." + footer_link
+            return "Mohon masukkan kata kunci yang lebih spesifik.\n\n---\n*Untuk informasi lebih lanjut, silakan kunjungi [INSW INTR](https://insw.go.id/intr).*"
 
         # HS Code Auto-detection: If input is purely numeric, treat as HS Code
         clean_input = user_input.strip()
@@ -200,33 +198,34 @@ def search_insw_regulation(user_input):
                     # Simple string comparison works for ISO dates to find latest
                     if latest_date is None or date_str > latest_date:
                         latest_date = date_str
- 
-        # Add disclaimer about data date if available
-        date_prefix = ""
+
+        # Build footer with data date if available
         if latest_date:
             formatted_date = _format_date(latest_date)
-            date_prefix = f"**Berdasarkan data INSW pada {formatted_date}**\n\n"
+            footer = f"\n\n---\n*Data yang disajikan di atas berdasarkan informasi INSW per {formatted_date}. Untuk informasi terbaru atau pencarian manual, silakan kunjungi [INSW INTR](https://insw.go.id/intr).*"
+        else:
+            footer = "\n\n---\n*Untuk informasi terbaru atau pencarian manual, silakan kunjungi [INSW INTR](https://insw.go.id/intr).*"
 
         if max_score < chatbot_utils.CONFIDENCE_THRESHOLD:
             logger.warning(f"INSW Low confidence: {max_score} for query '{user_input}'")
-            return date_prefix + "Maaf, saya tidak menemukan informasi regulasi INSW yang cukup relevan untuk menjawab pertanyaan Anda. Mohon pastikan kata kunci atau HS Code yang Anda masukkan benar." + footer_link
+            return "Maaf, saya tidak menemukan informasi regulasi HS Code yang cukup relevan untuk menjawab pertanyaan Anda. Mohon pastikan kata kunci atau HS Code yang Anda masukkan benar." + footer
         
         if not results:
             logger.warning(f"INSW No results for query '{user_input}'")
-            return date_prefix + "Tidak ditemukan data INSW yang relevan. Silakan coba kata kunci lain." + footer_link
+            return "Tidak ditemukan data HS Code yang relevan. Silakan coba kata kunci lain." + footer
         
         # Build context from search results
         context = _build_insw_context(results)
         
         # Generate LLM response with Indonesian system prompt
-        system_prompt = """Anda adalah Asisten INSW (Indonesia National Single Window) untuk regulasi ekspor-impor.
+        system_prompt = """Anda adalah Asisten HS Code untuk regulasi ekspor-impor.
 
 Peran Anda:
 - Memberikan informasi akurat tentang HS Code, regulasi import/export, dan dokumen kepabeanan
 - Menjelaskan ketentuan larangan/pembatasan (Lartas) yang berlaku secara spesifik (Border vs Post-Border)
 - Mengutip dasar hukum/peraturan yang relevan
 - Menggunakan Bahasa Indonesia yang profesional
-- Data yang Anda gunakan berasal dari database INSW, BUKAN dari pengguna
+- Data yang Anda gunakan berasal dari database HS Code, BUKAN dari pengguna
 
 Format Jawaban:
 1. **Ringkasan**: Jawaban singkat tentang HS Code, uraian barang, dan status regulasinya.
@@ -236,34 +235,35 @@ Format Jawaban:
    - **Ekspor**: Ketentuan ekspor (jika ada).
 3. **Dokumen yang Diperlukan**: Dokumen BC dan perizinan yang dibutuhkan.
 4. **Dasar Hukum**: Peraturan yang menjadi dasar ketentuan.
-5. **Link Referensi**: Sertakan link INSW jika tersedia.
+5. **Link Referensi**: Sertakan link referensi jika tersedia.
 
 Penting:
 - Selalu sebutkan HS Code lengkap (8 digit)
 - Bedakan dengan jelas antara regulasi Border dan Post-Border
 - Jika ada beberapa HS Code relevan, jelaskan detailnya satu per satu
 - Jika informasi tidak tersedia, nyatakan dengan jelas
-- JANGAN katakan "berdasarkan data yang Anda berikan" - data berasal dari database INSW, bukan dari pengguna
-- Gunakan frasa seperti "berdasarkan data INSW" atau "berdasarkan informasi dari database"""
-        
+- JANGAN katakan "berdasarkan data yang Anda berikan" - data berasal dari database HS Code, bukan dari pengguna
+- Gunakan frasa seperti "berdasarkan data HS Code" atau "berdasarkan informasi dari database"
+"""
+
         user_message = f"""Konteks:
 {context}
 
 Pertanyaan: {user_input}
 
 Berikan jawaban yang komprehensif berdasarkan konteks di atas."""
-        
+
         # Use the global client instance
-        start_time = datetime.now()
+        start_time = datetime.now(ZoneInfo("Asia/Jakarta"))
         response = client.models.generate_content(
             model=os.getenv("LLM_MODEL", "gemini-2.5-flash"),
             contents=[
                 {"role": "user", "parts": [{"text": system_prompt}]},
-                {"role": "model", "parts": [{"text": "Saya mengerti. Saya akan menjawab pertanyaan tentang regulasi INSW dengan mengutip HS Code, ketentuan import/export (Border/Post-Border), dan dasar hukum yang relevan."}]},
+                {"role": "model", "parts": [{"text": "Saya mengerti. Saya akan menjawab pertanyaan tentang regulasi HS Code dengan mengutip HS Code, ketentuan import/export (Border/Post-Border), dan dasar hukum yang relevan."}]},
                 {"role": "user", "parts": [{"text": user_message}]}
             ]
         )
-        end_time = datetime.now()
+        end_time = datetime.now(ZoneInfo("Asia/Jakarta"))
         duration = (end_time - start_time).total_seconds()
         
         # Log LLM analytics
@@ -275,71 +275,15 @@ Berikan jawaban yang komprehensif berdasarkan konteks di atas."""
             "output_chars": len(response.text)
         })
         
-        return date_prefix + response.text + footer_link
-    
+        return response.text + footer
+
     except Exception as e:
         logger.error(f"Error searching INSW regulations: {e}", exc_info=True)
-        print(f"Error searching INSW regulations: {e}")
         import traceback
         traceback.print_exc()
-        return f"❌ Error: {str(e)}\n\nSilakan coba lagi atau hubungi administrator." + footer_link
+        return f"❌ Error: {str(e)}\n\nSilakan coba lagi atau hubungi administrator.\n\n---\n*Untuk informasi lebih lanjut, silakan kunjungi [INSW INTR](https://insw.go.id/intr).*"
 
-def show():
-    """Display INSW Chatbot page"""
-    # Initialize chat history for INSW chatbot if not exists
-    if "messages_insw" not in st.session_state:
-        st.session_state.messages_insw = []
-    
-    # Initialize edit state
-    if "edit_message_index_insw" not in st.session_state:
-        st.session_state.edit_message_index_insw = None
-    
-    # Sync messages from Redis to Session State
-    # This ensures we pick up the new response after background worker finishes
-    if "current_session_id" in st.session_state and st.session_state.current_session_id:
-        db_messages = database.load_chat_history("guest", "INSW", st.session_state.current_session_id)
-        # Convert to format expected by UI
-        st.session_state.messages_insw = [
-            {"role": m["role"], "content": m["content"], "timestamp": m.get("timestamp")} 
-            for m in db_messages
-        ]
+        
 
-    # Display chat history
-    for idx, message in enumerate(st.session_state.messages_insw):
-        chatbot_utils.render_chat_message(
-            message, 
-            idx, 
-            "messages_insw", 
-            "edit_message_index_insw",
-            lambda i, t: chatbot_utils.regenerate_response(i, t, "messages_insw", "INSW", search_insw_regulation)
-        )
-    
-    # Chat input
-    # Check status from DB
-    session_id = st.session_state.get("current_session_id")
-    if not session_id:
-        return
 
-    status = database.get_session_status(session_id)
-    is_processing = (status == "processing")
 
-    prompt = st.chat_input(
-        "Search for INSW regulations... (e.g., 'export permit requirements')",
-        key="insw_input",
-        disabled=is_processing
-    )
-
-    if prompt:
-        chatbot_utils.handle_chat_input(prompt, "messages_insw", "INSW", search_insw_regulation)
-    
-    # Polling if processing
-    if is_processing:
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                import time
-                while True:
-                    time.sleep(1)
-                    new_status = database.get_session_status(session_id)
-                    if new_status != "processing":
-                        st.rerun()
-                        break

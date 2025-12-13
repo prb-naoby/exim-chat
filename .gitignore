@@ -13,6 +13,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!frontend/lib/
 lib64/
 parts/
 sdist/
@@ -21,6 +22,9 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+*.pyc
+*.pyd
+*.pyo
 
 # =========================
 # Virtual Environment
@@ -29,12 +33,13 @@ wheels/
 venv/
 ENV/
 env/
-.env.local
 
 # =========================
 # Environment Variables (SECRETS!)
 # =========================
 .env
+.env.local
+frontend/.env.local
 
 # =========================
 # IDE / Editor
@@ -54,13 +59,25 @@ env/
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
 chat_history.db
+data/
 
 # =========================
 # Logs
 # =========================
 *.log
+logs/
 ingestion_log_*.json
+
+# =========================
+# Debug / Temporary
+# =========================
+debug_pages/
+*.tmp
+*.temp
+*.bak
 
 # =========================
 # OS Generated
@@ -82,6 +99,8 @@ desktop.ini
 htmlcov/
 .tox/
 .nox/
+*.cover
+.hypothesis/
 
 # =========================
 # Jupyter Notebook
@@ -89,8 +108,25 @@ htmlcov/
 .ipynb_checkpoints/
 
 # =========================
-# Temporary Files
+# Frontend (Next.js)
 # =========================
-*.tmp
-*.temp
-*.bak
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
+frontend/.vercel/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# =========================
+# Build Artifacts
+# =========================
+*.tsbuildinfo
+next-env.d.ts
+
+# =========================
+# Antigravity Artifacts
+# =========================
+.agent/

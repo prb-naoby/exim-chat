@@ -1,16 +1,15 @@
+version: '3.8'
+
 services:
-  exim-chat:
-    image: ghcr.io/prb-naoby/exim-chat:latest
-    container_name: exim-chat
+  backend:
+    build: .
+    container_name: exim-backend
     ports:
-      - "8504:8504"
+      - "3333:3333"
     volumes:
       - exim_data:/app/data
       - ./logs:/app/logs
     environment:
-      - REDIS_HOST=${REDIS_HOST}
-      - REDIS_PORT=${REDIS_PORT}
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - APP_PASSWORD=${APP_PASSWORD}
       - INSW_QDRANT_URL=${INSW_QDRANT_URL}
@@ -23,25 +22,51 @@ services:
       - CONFIDENCE_THRESHOLD=${CONFIDENCE_THRESHOLD}
       - LLM_MODEL=${LLM_MODEL}
       - SOP_FOLDER_PATH=${SOP_FOLDER_PATH}
-      - INSW_SOP_FOLDER_PATH=${INSW_SOP_FOLDER_PATH}
+      - GENERAL_FOLDER_PATH=${GENERAL_FOLDER_PATH}
       - CASES_FOLDER_PATH=${CASES_FOLDER_PATH}
-      # OneDrive Config
       - ONEDRIVE_DRIVE_ID=${ONEDRIVE_DRIVE_ID}
       - MS_TENANT_ID=${MS_TENANT_ID}
       - MS_CLIENT_ID=${MS_CLIENT_ID}
       - MS_CLIENT_SECRET=${MS_CLIENT_SECRET}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - CASES_QDRANT_URL=${CASES_QDRANT_URL}
+      - CASES_QDRANT_API_KEY=${CASES_QDRANT_API_KEY}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL}
+      - VECTOR_SIZE=${VECTOR_SIZE}
+      - INSW_FOLDER_PATH=${INSW_FOLDER_PATH}
+      - GENERAL_QDRANT_COLLECTION_NAME=${GENERAL_QDRANT_COLLECTION_NAME}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - TZ=Asia/Jakarta
     networks:
-      - default
+      - exim_network
       - redis
       - nginx-network
-    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 3333 --reload
+
+  frontend:
+    build: ./frontend
+    container_name: exim-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:3333
+      - TZ=Asia/Jakarta
+    networks:
+      - exim_network
+    depends_on:
+      - backend
 
 volumes:
   exim_data:
 
 
 networks:
-  default:
+  exim_network:
     name: exim_network
   redis:
     external: true

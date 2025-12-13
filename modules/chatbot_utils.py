@@ -1,11 +1,26 @@
-import json
-import streamlit as st
-from datetime import datetime
-from modules import database
 import os
-from google import genai
+# Robust import for google.genai
+genai = None
+try:
+    # Try new SDK first (google.genai)
+    from google import genai
+except ImportError:
+    try:
+        # Try direct module import
+        import google.genai as genai
+    except ImportError:
+        try:
+            # Try old SDK
+            import google.generativeai as genai
+        except ImportError:
+            print("CRITICAL: Could not import google.genai or google.generativeai")
+            genai = None
 import requests
-from azure.identity import ClientSecretCredential
+try:
+    from azure.identity import ClientSecretCredential
+except ImportError:
+    ClientSecretCredential = None
+    print("WARNING: azure.identity not found. OneDrive features will be disabled.")
 
 # Confidence threshold for retrieval results
 # Reads from environment variable, defaults to 0.6
@@ -15,12 +30,16 @@ def init_gemini_client():
     """Initialize and return Gemini client"""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        st.error("GEMINI_API_KEY not found in environment variables.")
+        print("GEMINI_API_KEY not found in environment variables.")
         return None
     return genai.Client(api_key=api_key)
 
 def get_onedrive_token():
     """Get access token for Microsoft Graph API"""
+    if ClientSecretCredential is None:
+        print("Azure library missing")
+        return None
+
     try:
         tenant_id = os.getenv('MS_TENANT_ID')
         client_id = os.getenv('MS_CLIENT_ID')
@@ -41,26 +60,44 @@ def get_onedrive_token():
         print(f"Error getting OneDrive token: {e}")
         return None
 
-def get_onedrive_download_link(filename):
+def get_onedrive_download_link(filename, chatbot_type=None):
     """
     Generate a 1-hour valid download link for a file in OneDrive.
-    Caches the link in Redis for 3599 seconds.
+    Returns a temporary Microsoft Graph downloadUrl.
+    Iterates through known folders to find the file, prioritized by chatbot_type if provided.
     """
-    # 1. Check Cache
-    cache_key = f"onedrive_link:{filename}"
-    cached_link = database.redis_client.get(cache_key)
-    if cached_link:
-        return cached_link
 
-    # 2. Get Sync Param
     drive_id = os.getenv('ONEDRIVE_DRIVE_ID')
-    folder_path = os.getenv('SOP_FOLDER_PATH')
     
-    import logging
-    logger = logging.getLogger("app_logger") # Get the shared logger
+    # Define folder paths
+    sop_folder = os.getenv('SOP_FOLDER_PATH')
+    general_folder = os.getenv('GENERAL_FOLDER_PATH', os.getenv('OTHERS_FOLDER_PATH', 'AI/Others'))
+    insw_folder = os.getenv('INSW_FOLDER_PATH')
+    
+    # List of folders to check
+    folders_to_check = []
+    
+    # 1. Prioritize based on chatbot_type
+    if chatbot_type == 'SOP' and sop_folder:
+        folders_to_check.append(sop_folder)
+    elif chatbot_type == 'OTHERS' and general_folder:
+        folders_to_check.append(general_folder)
+    elif chatbot_type == 'INSW' and insw_folder:
+        folders_to_check.append(insw_folder)
+        
+    # 2. Add remaining folders as fallback (in case file is mis-categorized)
+    if sop_folder and sop_folder not in folders_to_check:
+        folders_to_check.append(sop_folder)
+    if general_folder and general_folder not in folders_to_check:
+        folders_to_check.append(general_folder)
+    if insw_folder and insw_folder not in folders_to_check:
+        folders_to_check.append(insw_folder)
 
-    if not drive_id or not folder_path:
-        logger.error("Missing OneDrive drive_id or folder_path")
+    import logging
+    logger = logging.getLogger("app_logger")
+
+    if not drive_id or not folders_to_check:
+        logger.error("Missing OneDrive drive_id or folder paths configuration")
         return None
 
     token = get_onedrive_token()
@@ -70,71 +107,55 @@ def get_onedrive_download_link(filename):
 
     headers = {"Authorization": f"Bearer {token}"}
     graph_base_url = "https://graph.microsoft.com/v1.0"
+    
+    import urllib.parse
 
-    try:
-        # 3. Search for File
-        import urllib.parse
-        encoded_path = urllib.parse.quote(folder_path)
-        
-        logger.info(f"Generating download link for: '{filename}' in '{folder_path}'")
-        
-        # Construct search URL
-        search_url = f"{graph_base_url}/drives/{drive_id}/root:/{encoded_path}:/search(q='{filename}')"
-        logger.info(f"OneDrive Search URL: {search_url}")
-        
-        response = requests.get(search_url, headers=headers)
-        if response.status_code != 200:
-            logger.error(f"OneDrive Search Failed: {response.status_code} - {response.text}")
-            return None
+    # Iterate through folders and return the first valid link found
+    for folder_path in folders_to_check:
+        try:
+            # logger.info(f"Checking for file '{filename}' in '{folder_path}'...")
             
-        data = response.json()
-        item_count = len(data.get('value', []))
-        logger.info(f"Found {item_count} items")
+            # Format: /drives/{drive_id}/root:/{folder}/{filename}?select=id,name,@microsoft.graph.downloadUrl
+            encoded_filename = urllib.parse.quote(filename)
+            encoded_folder = urllib.parse.quote(folder_path)
+            
+            direct_url = (
+                f"{graph_base_url}/drives/{drive_id}/root:/{encoded_folder}/{encoded_filename}"
+                f"?select=id,name,@microsoft.graph.downloadUrl"
+            )
+            
+            response = requests.get(direct_url, headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                download_url = data.get('@microsoft.graph.downloadUrl')
+                
+                if download_url:
+                    logger.info(f"Download URL FOUND for '{filename}' in '{folder_path}'")
+                    logger.info(f"Generated Direct URL: {download_url[:100]}...")
+                    return download_url
+            elif response.status_code == 404:
+                # Debug: List files in this folder to see if we missed it due to encoding/casing
+                logger.info(f"DEBUG: File not found in '{folder_path}'. Listing contents to find match...")
+                try:
+                    # Just list names to debug
+                    list_url = f"{graph_base_url}/drives/{drive_id}/root:/{encoded_folder}:/children?select=name"
+                    list_res = requests.get(list_url, headers=headers)
+                    if list_res.status_code == 200:
+                        files = [f['name'] for f in list_res.json().get('value', [])]
+                        logger.info(f"DEBUG: Contents of '{folder_path}': {files}")
+                except Exception as e:
+                    logger.error(f"Failed to list folder: {e}")
 
-        found_item_id = None
-        # Find exact match or best match
-        for item in data.get('value', []):
-            item_name = item.get('name', '')
-            logger.info(f"  Candidate: {item_name}")
-            
-            # Case-insensitive check and looser matching
-            if filename.lower().strip() in item_name.lower().strip() or \
-               item_name.lower().strip() in filename.lower().strip():
-                found_item_id = item.get('id')
-                logger.info(f"  Match matching item ID: {found_item_id}")
-                break
-        
-        if not found_item_id:
-            logger.warning(f"File not found or no matching item for: {filename}")
-            return None
-
-        # 4. Fetch Item Details explicitly to get downloadUrl
-        item_url = f"{graph_base_url}/drives/{drive_id}/items/{found_item_id}"
-        logger.info(f"Fetching item details: {item_url}")
-        
-        item_response = requests.get(item_url, headers=headers)
-        if item_response.status_code == 200:
-            item_data = item_response.json()
-            download_url = item_data.get('@microsoft.graph.downloadUrl')
-            
-            if download_url:
-                logger.info(f"  Download URL retrieved successfully.")
-                # 5. Cache in Redis
-                database.redis_client.setex(cache_key, 3599, download_url)
-                return download_url
+                continue
             else:
-                logger.error("  Item found but no @microsoft.graph.downloadUrl property present.")
-                # Fallback: Try createLink?
-                # For now return None as requested "msgraph download url" usually implies this one.
-        else:
-             logger.error(f"Failed to fetch item details: {item_response.status_code}")
+                logger.warning(f"OneDrive error for '{filename}' in '{folder_path}': {response.status_code}")
+                
+        except Exception as e:
+            logger.error(f"Error checking folder '{folder_path}': {e}")
+            continue
 
-        return None
-            
-    except Exception as e:
-        logger.error(f"Error generating OneDrive link: {e}")
-        return None
-
+    logger.error(f"File not found in any configured folders: {filename}")
     return None
     
 def create_embedding(client, text: str, model: str = "models/gemini-embedding-001"):
@@ -166,256 +187,24 @@ def create_sparse_vector(text: str):
     
     return {"indices": indices, "values": values}
 
-# --- Security Utils ---
-from cryptography.fernet import Fernet
 
-def get_encryption_key():
-    """Get or create encryption key"""
-    # In production, this should be a fixed env var.
-    key = os.getenv("ENCRYPTION_KEY")
-    # Fallback key (valid 32-byte base64-encoded Fernet key)
-    # User provided key must be 32 bytes and then base64 encoded
-    import base64
-    raw_key = b'iniadalahencryptionkeyuntukinswchat'.ljust(32)[:32]
-    DEFAULT_KEY = base64.urlsafe_b64encode(raw_key)
-
-    if key:
-        try:
-            # 1. Try using key as-is (assuming it's already base64 Fernet key)
-            Fernet(key.encode() if isinstance(key, str) else key)
-            return key
-        except Exception:
-            # 2. Try to fix raw string key -> Base64
-            try:
-                # Ensure 32 bytes
-                raw = key.encode() if isinstance(key, str) else key
-                padded = raw.ljust(32)[:32]
-                fixed_key = base64.urlsafe_b64encode(padded)
-                
-                # Check if fixed key works
-                Fernet(fixed_key)
-                # print(f"DEBUG: Auto-corrected raw ENCRYPTION_KEY to valid Fernet key.") # Optional debug
-                final_key = fixed_key.decode()
-                print(f"DEBUG KEY IN USE (Fixed): {final_key[:10]}... Len: {len(final_key)}") # Temporary debug
-                return final_key
-            except Exception as e:
-                print(f"WARNING: Invalid ENCRYPTION_KEY in environment ({e}). Using fallback dev key.")
-            
-    print(f"DEBUG KEY IN USE (Default): {DEFAULT_KEY[:10]}... Len: {len(DEFAULT_KEY)}")
-    return DEFAULT_KEY
-
-def generate_secure_token(filename, session_id):
-    """Encrypt filename and session_id into a token"""
+def generate_chat_title(client, user_input, response_text):
+    """Generate concise title using Gemini"""
     try:
-        key = get_encryption_key()
-        # Ensure key is bytes
-        if isinstance(key, str):
-            key = key.encode()
-            
-        f = Fernet(key)
-        # Payload: "session_id|filename"
-        payload = f"{session_id}|{filename}".encode()
-        token = f.encrypt(payload).decode()
-        print(f"DEBUG: Generated NEW token for {filename} (Session: {session_id})")
-        return token
+        model = "gemini-2.5-flash"
+        prompt = f"""Generate a very short, concise title (3-5 words) for this chat conversation.
+User: {user_input[:200]}
+Assistant: {response_text[:200]}
+
+Title:"""
+        
+        response = client.models.generate_content(
+            model=model,
+            contents=[{"role": "user", "parts": [{"text": prompt}]}]
+        )
+        title = response.text.strip().replace('"', '').replace("Title:", "").strip()
+        return title if len(title) < 50 else title[:50]
     except Exception as e:
-        print(f"Error generating token: {e}")
-        # Improve fallback for dev?
-        # If key is invalid, generate new one? No, that breaks persistence.
+        print(f"Error generating title: {e}")
         return None
 
-def validate_secure_token(token, current_session_id):
-    """Decrypt token and validate session_id"""
-    try:
-        key = get_encryption_key()
-        if isinstance(key, str):
-            key = key.encode()
-            
-        f = Fernet(key)
-        payload = f.decrypt(token.encode()).decode()
-        token_session_id, filename = payload.split("|", 1)
-        
-        if token_session_id != current_session_id:
-            return None, "Invalid session"
-            
-        return filename, None
-    except Exception as e:
-        # InvalidToken (decryption failure) often has empty string representation
-        # We check class name or catch explicitly if imported
-        if type(e).__name__ == "InvalidToken":
-             print(f"WARNING: Token decryption failed (InvalidToken). Key might have changed.")
-             return None, "Invalid token (Decryption failed - Link might be expired or key changed)"
-        
-        print(f"Error validating token: {e}")
-        return None, "Invalid token"
-
-def render_message_content(content):
-    """
-    Render message content, handling special <CASE_DATA> blocks.
-    """
-    if "<CASE_DATA>" in content:
-        parts = content.split("<CASE_DATA>")
-        text_content = parts[0].strip()
-        case_json = parts[1].strip()
-        
-        # Render text content
-        st.markdown(text_content)
-        
-        # Render cases as table
-        try:
-            cases = json.loads(case_json)
-            if cases:
-                st.markdown("### Studi Kasus Terkait")
-                
-                # Build Markdown Table
-                table_md = "| Case No | Pertanyaan | Jawaban |\n| :--- | :--- | :--- |\n"
-                for case in cases:
-                    # Escape pipes in content to avoid breaking table
-                    q = case.get('question', '').replace('|', '\|').replace('\n', '<br>')
-                    a = case.get('answer', '').replace('|', '\|').replace('\n', '<br>')
-                    no = case.get('case_no', '')
-                    table_md += f"| #{no} | {q} | {a} |\n"
-                
-                st.markdown(table_md, unsafe_allow_html=True)
-        except Exception as e:
-            print(f"Error rendering case data: {e}")
-    else:
-        st.markdown(content)
-
-def render_chat_message(message, idx, session_key, edit_key, regen_callback):
-    """
-    Render a single chat message.
-    
-    Args:
-        message (dict): Message object {role, content, timestamp}
-        idx (int): Index in the message list
-        session_key (str): Session state key for messages (e.g., 'messages_sop')
-        edit_key (str): Session state key for edit index (e.g., 'edit_message_index')
-        regen_callback (func): Function to call for regeneration/saving
-    """
-    with st.chat_message(message["role"]):
-        # Header with timestamp
-        if "timestamp" in message:
-            st.markdown(
-                f"<div style='font-size: 0.75rem; color: #888; margin-bottom: 0.2rem;'>{message['timestamp']}</div>", 
-                unsafe_allow_html=True
-            )
-        
-        # Display Content
-        render_message_content(message["content"])
-
-import threading
-import time
-
-def run_background_generation(prompt, session_key, chatbot_type, response_generator, session_id, username):
-    """Background worker to generate response and update Redis"""
-    try:
-        # Generate Response
-        # Pass session_id to generator so it can create secure links even in bg thread
-        try:
-            response = response_generator(prompt, session_id=session_id)
-        except TypeError:
-             # Fallback for generators that don't accept session_id
-             response = response_generator(prompt)
-             
-        assistant_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # Save to Redis
-        database.save_message(
-            username, 
-            chatbot_type, 
-            "assistant", 
-            response,
-            session_id,
-            assistant_timestamp
-        )
-        
-        # Update status to idle (done)
-        database.set_session_status(session_id, "idle")
-        
-    except Exception as e:
-        print(f"Error in background generation: {e}")
-        database.set_session_status(session_id, "error")
-
-def handle_chat_input(prompt, session_key, chatbot_type, response_generator):
-    """
-    Handle new user input: add to state, save to db, start background generation.
-    """
-    session_id = st.session_state.current_session_id
-    user_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # Use browser_id if available, else fallback to guest (shouldn't happen if setup correctly)
-    username = st.session_state.get("browser_id", "guest")
-
-    # 1. Add User Message to Local State (Optimistic UI)
-    st.session_state[session_key].append({
-        "role": "user", 
-        "content": prompt, 
-        "timestamp": user_timestamp
-    })
-    
-    # 2. Save User Message to Redis
-    database.save_message(
-        username, 
-        chatbot_type, 
-        "user", 
-        prompt,
-        session_id,
-        user_timestamp
-    )
-    
-    # 3. Update Title if first message
-    if len(st.session_state[session_key]) == 1:
-         database.update_session_title(username, chatbot_type, session_id)
-    
-    # 4. Set Status to Processing
-    database.set_session_status(session_id, "processing")
-    
-    # 5. Start Background Thread
-    thread = threading.Thread(
-        target=run_background_generation,
-        args=(prompt, session_key, chatbot_type, response_generator, session_id, username)
-    )
-    thread.start()
-    
-    # 6. Rerun to show the user message and enter polling mode
-    st.rerun()
-
-def regenerate_response(idx, new_text, session_key, chatbot_type, response_generator):
-    """
-    Logic to update a user message and regenerate the response.
-    """
-    username = st.session_state.get("browser_id", "guest")
-    
-    # 1. Update User Message
-    st.session_state[session_key][idx]["content"] = new_text
-    st.session_state[session_key][idx]["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # 2. Truncate history (remove everything after this message)
-    st.session_state[session_key] = st.session_state[session_key][:idx+1]
-    
-    # 3. Generate New Response
-    # Pass session_id to ensure secure links are generated
-    try:
-        response = response_generator(new_text, session_id=st.session_state.current_session_id)
-    except TypeError:
-        # Fallback
-        response = response_generator(new_text)
-        
-    assistant_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    # 4. Add New Response
-    st.session_state[session_key].append({
-        "role": "assistant",
-        "content": response,
-        "timestamp": assistant_timestamp
-    })
-    
-    # 5. Update DB
-    database.save_message(
-        username, chatbot_type, "user", new_text, st.session_state.current_session_id, st.session_state[session_key][idx]["timestamp"]
-    )
-    database.save_message(
-        username, chatbot_type, "assistant", response, st.session_state.current_session_id, assistant_timestamp
-    )
-    
-    st.rerun()

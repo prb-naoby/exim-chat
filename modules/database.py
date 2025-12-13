@@ -1,226 +1,530 @@
-import redis
+import sqlite3
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import os
 from dotenv import load_dotenv
+import uuid
 
 load_dotenv()
 
-# Redis Configuration
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
-REDIS_DB = 0
+# SQLite Configuration
+DB_NAME = "chat_history.db"
+# Store in 'data' directory for docker persistence
+SQLITE_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", DB_NAME)
 
-# Initialize Redis client
-redis_client = redis.Redis(
-    host=REDIS_HOST, 
-    port=REDIS_PORT, 
-    password=REDIS_PASSWORD, 
-    db=REDIS_DB, 
-    decode_responses=True
-)
+def get_db_connection():
+    """Get a SQLite database connection"""
+    conn = sqlite3.connect(SQLITE_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def init_database():
-    """Check Redis connection"""
+    """Initialize SQLite database with all tables"""
     try:
-        redis_client.ping()
-        print("Successfully connected to Redis")
-    except redis.ConnectionError:
-        print("Failed to connect to Redis. Make sure Redis is running.")
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        # Enable WAL mode for better concurrency
+        conn.execute("PRAGMA journal_mode=WAL;")
+        c = conn.cursor()
+        
+        # 1. Users Table
+        c.execute('''CREATE TABLE IF NOT EXISTS users (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username TEXT UNIQUE NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        role TEXT DEFAULT 'user',
+                        display_name TEXT,
+                        requested_at TIMESTAMP,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )''')
+        
+        # Migration: Add display_name column if not exists
+        c.execute("PRAGMA table_info(users)")
+        columns = [col[1] for col in c.fetchall()]
+        if 'display_name' not in columns:
+            c.execute("ALTER TABLE users ADD COLUMN display_name TEXT")
+            print("Added display_name column to users table")
+        if 'requested_at' not in columns:
+            c.execute("ALTER TABLE users ADD COLUMN requested_at TIMESTAMP")
+            print("Added requested_at column to users table")
+                    
+        # 2. Sessions Table
+        c.execute('''CREATE TABLE IF NOT EXISTS sessions (
+                        session_id TEXT PRIMARY KEY,
+                        username TEXT NOT NULL,
+                        chatbot_type TEXT NOT NULL,
+                        title TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        status TEXT DEFAULT 'idle',
+                        FOREIGN KEY(username) REFERENCES users(username)
+                    )''')
+                    
+        # 3. Messages Table
+        c.execute('''CREATE TABLE IF NOT EXISTS messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT NOT NULL,
+                        role TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+                    )''')
+        
+        # 4. Pending Users Table (for registration approval)
+        c.execute('''CREATE TABLE IF NOT EXISTS pending_users (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username TEXT UNIQUE NOT NULL,
+                        email TEXT NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        status TEXT DEFAULT 'pending'
+                    )''')
+        
+        # Migration: Rename created_at to requested_at in pending_users
+        c.execute("PRAGMA table_info(pending_users)")
+        pending_columns = [col[1] for col in c.fetchall()]
+        if 'requested_at' not in pending_columns and 'created_at' in pending_columns:
+            # SQLite doesn't support ALTER COLUMN with non-constant default (like CURRENT_TIMESTAMP)
+            # So we add it as nullable, then populate it
+            c.execute("ALTER TABLE pending_users ADD COLUMN requested_at TIMESTAMP")
+            c.execute("UPDATE pending_users SET requested_at = created_at WHERE requested_at IS NULL")
+            print("Migrated pending_users to use requested_at")
+        
+        # 5. LLM Logs Table (for developer dashboard)
+        c.execute('''CREATE TABLE IF NOT EXISTS llm_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT,
+                        username TEXT,
+                        chatbot_type TEXT,
+                        status TEXT,
+                        input_tokens INTEGER DEFAULT 0,
+                        output_tokens INTEGER DEFAULT 0,
+                        latency_ms INTEGER DEFAULT 0,
+                        error_message TEXT,
+                        query TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )''')
+        
+        # 6. Ingestion Logs Table (for admin dashboard)
+        c.execute('''CREATE TABLE IF NOT EXISTS ingestion_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        pipeline_name TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        started_at TIMESTAMP,
+                        completed_at TIMESTAMP,
+                        files_processed INTEGER DEFAULT 0,
+                        files_upserted INTEGER DEFAULT 0,
+                        files_skipped INTEGER DEFAULT 0,
+                        errors INTEGER DEFAULT 0,
+                        summary TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )''')
+        
+        conn.commit()
+        conn.close()
+        print(f"Successfully initialized SQLite database at {SQLITE_DB_PATH}")
+    except Exception as e:
+        print(f"Failed to initialize SQLite database: {e}")
 
-def get_or_create_user(username):
-    """
-    In Redis, we don't need to explicitly create users in a separate table.
-    We just use the username in the key.
-    But for compatibility with the interface:
-    """
-    return username
+# -----------------------------------------------------------------------------
+# Ingestion Logging
+# -----------------------------------------------------------------------------
+
+def log_ingestion_run(pipeline_name: str, status: str, started_at: str = None, 
+                      completed_at: str = None, files_processed: int = 0,
+                      files_upserted: int = 0, files_skipped: int = 0,
+                      errors: int = 0, summary: str = None) -> int:
+    """Log an ingestion run to the database"""
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        c.execute('''INSERT INTO ingestion_logs 
+                     (pipeline_name, status, started_at, completed_at, files_processed,
+                      files_upserted, files_skipped, errors, summary)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (pipeline_name, status, started_at, completed_at, files_processed,
+                   files_upserted, files_skipped, errors, summary))
+        log_id = c.lastrowid
+        conn.commit()
+        conn.close()
+        return log_id
+    except Exception as e:
+        print(f"Error logging ingestion run: {e}")
+        return -1
+
+# -----------------------------------------------------------------------------
+# User Management
+# -----------------------------------------------------------------------------
+
+def add_user(username, password_hash, role="user"):
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        c.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", 
+                  (username, password_hash, role))
+        conn.commit()
+        conn.close()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    except Exception as e:
+        print(f"Error adding user: {e}")
+        return False
+
+def get_user_by_username(username):
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT * FROM users WHERE username = ?", (username,))
+        user = c.fetchone()
+        conn.close()
+        if user:
+            return dict(user)
+        return None
+    except Exception as e:
+        print(f"Error getting user: {e}")
+        return None
+
+def get_all_users():
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT id, username, display_name, role, requested_at, created_at FROM users")
+        users = [dict(row) for row in c.fetchall()]
+        conn.close()
+        return users
+    except Exception as e:
+        print(f"Error getting all users: {e}")
+        return []
+
+def delete_user_by_id(user_id):
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        c.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error deleting user: {e}")
+        return False
+
+def update_user_display_name(username, display_name):
+    """Update user's display name"""
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        c.execute("UPDATE users SET display_name = ? WHERE username = ?", 
+                  (display_name, username))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error updating display name: {e}")
+        return False
+
+def update_user_password(username, new_password_hash):
+    """Update user's password"""
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        c.execute("UPDATE users SET password_hash = ? WHERE username = ?", 
+                  (new_password_hash, username))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error updating password: {e}")
+        return False
+
+# -----------------------------------------------------------------------------
+# Pending User Management
+# -----------------------------------------------------------------------------
+
+def add_pending_user(username, email, password_hash):
+    """Add a user registration request for admin approval"""
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        c.execute("INSERT INTO pending_users (username, email, password_hash, requested_at) VALUES (?, ?, ?, ?)", 
+                  (username, email, password_hash, datetime.now(ZoneInfo("Asia/Jakarta"))))
+        conn.commit()
+        conn.close()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    except Exception as e:
+        print(f"Error adding pending user: {e}")
+        return False
+
+def get_pending_users():
+    """Get all pending registration requests"""
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        # Use COALESCE to handle migration: prefer requested_at, fallback to created_at
+        c.execute("""SELECT id, username, email, 
+                     COALESCE(requested_at, created_at) as requested_at, status 
+                     FROM pending_users WHERE status = 'pending' 
+                     ORDER BY COALESCE(requested_at, created_at) DESC""")
+        users = [dict(row) for row in c.fetchall()]
+        conn.close()
+        return users
+    except Exception as e:
+        print(f"Error getting pending users: {e}")
+        return []
+
+def get_pending_user_by_id(user_id):
+    """Get a pending user by ID"""
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT * FROM pending_users WHERE id = ?", (user_id,))
+        user = c.fetchone()
+        conn.close()
+        return dict(user) if user else None
+    except Exception as e:
+        print(f"Error getting pending user: {e}")
+        return None
+
+def approve_pending_user(user_id):
+    """Approve a pending user and move them to users table"""
+    try:
+        pending = get_pending_user_by_id(user_id)
+        if not pending:
+            return False
+        
+        # Add to users table with requested_at from pending
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        requested_at = pending.get('requested_at') or pending.get('created_at')
+        c.execute("""INSERT INTO users (username, password_hash, role, requested_at, created_at) 
+                     VALUES (?, ?, 'user', ?, CURRENT_TIMESTAMP)""", 
+                  (pending['username'], pending['password_hash'], requested_at))
+        
+        # Update pending status
+        c.execute("UPDATE pending_users SET status = 'approved' WHERE id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error approving user: {e}")
+        return False
+
+def reject_pending_user(user_id):
+    """Reject a pending user request"""
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        c.execute("UPDATE pending_users SET status = 'rejected' WHERE id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error rejecting user: {e}")
+        return False
+
+def check_pending_username_exists(username):
+    """Check if username exists in pending users"""
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT 1 FROM pending_users WHERE username = ? AND status = 'pending'", (username,))
+        exists = c.fetchone() is not None
+        conn.close()
+        return exists
+    except Exception as e:
+        print(f"Error checking pending username: {e}")
+        return False
+
+# -----------------------------------------------------------------------------
+# Chat Session Management
+# -----------------------------------------------------------------------------
+
+def create_session(username, chatbot_type, session_id=None, title="New Chat"):
+    if not session_id:
+        session_id = str(uuid.uuid4())
+    
+    timestamp = datetime.now(ZoneInfo("Asia/Jakarta")).isoformat()
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        c.execute("""INSERT INTO sessions (session_id, username, chatbot_type, title, created_at, last_activity) 
+                     VALUES (?, ?, ?, ?, ?, ?)""",
+                  (session_id, username, chatbot_type, title, timestamp, timestamp))
+        conn.commit()
+        conn.close()
+        return session_id
+    except Exception as e:
+        print(f"Error creating session: {e}")
+        return None
+
+def get_chat_sessions(username, chatbot_type):
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        
+        # Get sessions with message count
+        query = """
+            SELECT s.session_id, s.title, s.last_activity, COUNT(m.id) as message_count 
+            FROM sessions s
+            LEFT JOIN messages m ON s.session_id = m.session_id
+            WHERE s.username = ? AND s.chatbot_type = ?
+            GROUP BY s.session_id
+            ORDER BY s.last_activity DESC
+        """
+        c.execute(query, (username, chatbot_type))
+        
+        sessions = [dict(row) for row in c.fetchall()]
+        conn.close()
+        return sessions
+    except Exception as e:
+        print(f"Error getting sessions: {e}")
+        return []
+
+def get_session_by_id(session_id):
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT * FROM sessions WHERE session_id = ?", (session_id,))
+        session = c.fetchone()
+        conn.close()
+        if session:
+            return dict(session)
+        return None
+    except Exception as e:
+        print(f"Error getting session: {e}")
+        return None
+
+def delete_session(username, chatbot_type, session_id): 
+    # username and chatbot_type are for validation, but ID is unique
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        c.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error deleting session: {e}")
+
+def update_session_title(session_id, title):
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        c.execute("UPDATE sessions SET title = ? WHERE session_id = ?", (title, session_id))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error updating session title: {e}")
+
+def set_session_status(session_id, status):
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        c.execute("UPDATE sessions SET status = ? WHERE session_id = ?", (status, session_id))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error setting session status: {e}")
+
+def get_session_status(session_id):
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT status FROM sessions WHERE session_id = ?", (session_id,))
+        row = c.fetchone()
+        conn.close()
+        return row['status'] if row else 'idle'
+    except Exception as e:
+        return 'idle'
+
+# -----------------------------------------------------------------------------
+# Message Management
+# -----------------------------------------------------------------------------
 
 def save_message(username, chatbot_type, role, content, session_id, timestamp=None):
-    """Save a chat message to Redis"""
     if timestamp is None:
         timestamp = datetime.now().isoformat()
-    
-    # Message object
-    message = {
-        "role": role,
-        "content": content,
-        "timestamp": timestamp,
-        "chatbot_type": chatbot_type
-    }
-    
-    # Keys
-    session_key = f"session:{session_id}:messages"
-    meta_key = f"session:{session_id}:meta"
-    
-    # Use pipeline for atomic operations
-    pipe = redis_client.pipeline()
-    
-    # 1. Push message to list (Right Push preserves order)
-    pipe.rpush(session_key, json.dumps(message))
-    
-    # 2. Update session metadata and last_activity
-    pipe.hset(meta_key, mapping={
-        "username": username,
-        "chatbot_type": chatbot_type,
-        "last_activity": timestamp
-    })
-    
-    # 3. Add to sorted set of sessions for the user (score = timestamp)
-    user_sessions_key = f"user:{username}:sessions:{chatbot_type}"
-    # Score is timestamp as float (or int) for sorting
-    try:
-        score = datetime.fromisoformat(timestamp).timestamp()
-    except:
-        score = datetime.now().timestamp()
         
-    pipe.zadd(user_sessions_key, {session_id: score})
-    
-    pipe.execute()
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        
+        # Check if session exists, if not create it (auto-recovery)
+        c.execute("SELECT 1 FROM sessions WHERE session_id = ?", (session_id,))
+        if not c.fetchone():
+            c.execute("""INSERT INTO sessions (session_id, username, chatbot_type, title, created_at, last_activity) 
+                         VALUES (?, ?, ?, ?, ?, ?)""",
+                      (session_id, username, chatbot_type, "New Chat", timestamp, timestamp))
+        
+        # Save message
+        c.execute("INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+                  (session_id, role, content, timestamp))
+        
+        # Update last activity
+        c.execute("UPDATE sessions SET last_activity = ? WHERE session_id = ?", (timestamp, session_id))
+        
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error saving message: {e}")
 
 def load_chat_history(username, chatbot_type, session_id=None):
-    """Load chat history from Redis"""
     if not session_id:
         return []
         
-    session_key = f"session:{session_id}:messages"
-    
-    # Get all messages from list
-    raw_messages = redis_client.lrange(session_key, 0, -1)
-    
-    messages = []
-    for raw in raw_messages:
-        try:
-            msg = json.loads(raw)
-            messages.append(msg)
-        except json.JSONDecodeError:
-            continue
-            
-    return messages
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT role, content, timestamp FROM messages WHERE session_id = ? ORDER BY id ASC", (session_id,))
+        messages = [dict(row) for row in c.fetchall()]
+        conn.close()
+        return messages
+    except Exception as e:
+        print(f"Error loading chat history: {e}")
+        return []
 
 def clear_chat_history(username, chatbot_type, session_id=None):
-    """Clear chat history (delete session)"""
+    # This effectively clears messages for a session
     if not session_id:
         return
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        c.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error clearing chat history: {e}")
 
-    session_key = f"session:{session_id}:messages"
-    meta_key = f"session:{session_id}:meta"
-    user_sessions_key = f"user:{username}:sessions:{chatbot_type}"
-    
-    pipe = redis_client.pipeline()
-    pipe.delete(session_key)
-    pipe.delete(meta_key)
-    pipe.zrem(user_sessions_key, session_id)
-    pipe.execute()
+def delete_all_sessions(username, chatbot_type):
+    """Delete all sessions for a specific user and chatbot type"""
+    try:
+        conn = sqlite3.connect(SQLITE_DB_PATH)
+        c = conn.cursor()
+        # Deleting sessions will cascade delete messages due to foreign key
+        c.execute("DELETE FROM sessions WHERE username = ? AND chatbot_type = ?", (username, chatbot_type))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error deleting all sessions: {e}")
+        return False
 
-def get_chat_sessions(username, chatbot_type):
-    """Get all chat sessions for a user and chatbot type sorted by last activity"""
-    user_sessions_key = f"user:{username}:sessions:{chatbot_type}"
-    
-    # Get session IDs sorted by score (timestamp) descending
-    session_ids = redis_client.zrevrange(user_sessions_key, 0, -1)
-    
-    sessions = []
-    for sid in session_ids:
-        meta_key = f"session:{sid}:meta"
-        messages_key = f"session:{sid}:messages"
-        
-        # Get metadata
-        meta = redis_client.hgetall(meta_key)
-        
-        # Get first message for title
-        first_msg_raw = redis_client.lindex(messages_key, 0)
-        first_msg_content = "New Chat"
-        if first_msg_raw:
-            try:
-                first_msg_content = json.loads(first_msg_raw).get("content", "New Chat")
-            except:
-                pass
-                
-        title = meta.get("title", first_msg_content[:50] + "..." if len(first_msg_content) > 50 else first_msg_content)
-        
-        # Get message count
-        count = redis_client.llen(messages_key)
-        
-        sessions.append({
-            "session_id": sid,
-            "title": title,
-            "message_count": count,
-            "last_message_time": meta.get("last_activity", "")
-        })
-        
-    return sessions
-
+# Compabitility shims for existing code
 def create_empty_session(username, chatbot_type, session_id):
-    """Create an empty session placeholder"""
-    timestamp = datetime.now().isoformat()
-    meta_key = f"session:{session_id}:meta"
-    user_sessions_key = f"user:{username}:sessions:{chatbot_type}"
-    
-    pipe = redis_client.pipeline()
-    pipe.hset(meta_key, mapping={
-        "username": username,
-        "chatbot_type": chatbot_type,
-        "created_at": timestamp,
-        "last_activity": timestamp,
-        "title": "New Chat"
-    })
-    
-    score = datetime.now().timestamp()
-    pipe.zadd(user_sessions_key, {session_id: score})
-    pipe.execute()
-
-def update_session_title(username, chatbot_type, session_id):
-    """Update session title based on first user message"""
-    messages_key = f"session:{session_id}:messages"
-    meta_key = f"session:{session_id}:meta"
-    
-    # Find first user message
-    messages = redis_client.lrange(messages_key, 0, -1)
-    for raw in messages:
-        try:
-            msg = json.loads(raw)
-            if msg.get("role") == "user":
-                content = msg.get("content", "")
-                title = content[:50] + "..." if len(content) > 50 else content
-                redis_client.hset(meta_key, "title", title)
-                break
-        except:
-            continue
-
-def delete_session(username, chatbot_type, session_id):
-    clear_chat_history(username, chatbot_type, session_id)
-
-def get_last_empty_session(username, chatbot_type):
-    """Get last empty session"""
-    # Simply check the most recent session
-    user_sessions_key = f"user:{username}:sessions:{chatbot_type}"
-    last_ids = redis_client.zrevrange(user_sessions_key, 0, 0)
-    
-    if not last_ids:
-        return None
-        
-    sid = last_ids[0]
-    messages_key = f"session:{sid}:messages"
-    count = redis_client.llen(messages_key)
-    
-    if count == 0:
-        return sid
-    return None
+    create_session(username, chatbot_type, session_id)
 
 def get_last_session_id(username, chatbot_type):
-    """Get the most recent session ID for a user"""
-    user_sessions_key = f"user:{username}:sessions:{chatbot_type}"
-    # Get the one with highest score (latest timestamp)
-    last_ids = redis_client.zrevrange(user_sessions_key, 0, 0)
-    return last_ids[0] if last_ids else None
-
-# Status management for async processing
-def set_session_status(session_id, status):
-    """Set session status (processing/idle)"""
-    redis_client.hset(f"session:{session_id}:meta", "status", status)
-
-def get_session_status(session_id):
-    """Get session status"""
-    return redis_client.hget(f"session:{session_id}:meta", "status") or "idle"
+    sessions = get_chat_sessions(username, chatbot_type)
+    if sessions:
+        return sessions[0]['session_id']
+    return None

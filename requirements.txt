@@ -1,4 +1,3 @@
-streamlit>=1.28.0
 qdrant-client
 requests
 python-dotenv
@@ -7,7 +6,14 @@ azure-identity
 pandas
 openpyxl
 python-dateutil
-redis
-redis
-cryptography
-extra-streamlit-components
+fastapi
+uvicorn
+python-multipart
+passlib
+bcrypt==4.0.1
+pyjwt
+httpx
+apscheduler>=3.10.0
+python-pptx
+pypdf
+pytest

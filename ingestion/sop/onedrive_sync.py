@@ -10,6 +10,7 @@ Workflow:
 
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import requests
 from azure.identity import ClientSecretCredential
 
@@ -168,7 +169,7 @@ class SOPOneDriveSync:
         
         # If no last_sync_date, check if modified today
         if not last_sync_date:
-            today = datetime.now().date()
+            today = datetime.now(ZoneInfo("Asia/Jakarta")).date()
             return modified_date.date() == today
         
         return True
@@ -199,7 +200,7 @@ class SOPOneDriveSync:
             'size': file_metadata['size'],
             'ocr_text': ocr_result.get('text', ''),
             'ocr_metadata': ocr_result.get('metadata', {}),
-            'processed_at': datetime.now().isoformat()
+            'processed_at': datetime.now(ZoneInfo("Asia/Jakarta")).isoformat()
         }
         
         return document

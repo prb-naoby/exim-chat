@@ -2,23 +2,28 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies if needed (e.g. for build tools)
-# RUN apt-get update && apt-get install -y build-essential
+# Install system dependencies
+# - LibreOffice for PPT/PPTX to PDF conversion
+# - Fonts for PDF rendering
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreoffice \
+    fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt .
 
-# Install dependencies
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
 
-# Create data directory
-RUN mkdir -p /app/data
+# Create data and logs directories
+RUN mkdir -p /app/data /app/logs
 
 # Expose the configured port
-EXPOSE 8504
+EXPOSE 3333
 
 # Run the application
-CMD ["streamlit", "run", "app.py", "--server.port=8504", "--server.address=0.0.0.0"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3333"]

@@ -7,9 +7,10 @@ Workflow:
 4. Upsert new/updated documents to Qdrant
 """
 
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
-import json
+from zoneinfo import ZoneInfo
+import oson
 import os
 
 from .onedrive_sync import OneDriveSync
@@ -77,7 +78,7 @@ class IngestionPipeline:
             'upserted': [],
             'skipped': [],
             'errors': [],
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': datetime.now(ZoneInfo("Asia/Jakarta")).isoformat(),
             'dry_run': dry_run
         }
         
