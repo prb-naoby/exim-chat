@@ -256,11 +256,9 @@ def add_pending_user(username, email, password_hash):
         c.execute("INSERT INTO pending_users (username, email, password_hash, requested_at) VALUES (?, ?, ?, ?)", 
                   (username, email, password_hash, now_jakarta))
         conn.commit()
-        print(f"DEBUG: Added pending user '{username}' with email '{email}' at {now_jakarta}")
         conn.close()
         return True
-    except sqlite3.IntegrityError as e:
-        print(f"DEBUG: IntegrityError adding pending user '{username}': {e}")
+    except sqlite3.IntegrityError:
         return False
     except Exception as e:
         print(f"Error adding pending user: {e}")
@@ -272,13 +270,10 @@ def get_pending_users():
         conn = sqlite3.connect(SQLITE_DB_PATH)
         conn.row_factory = sqlite3.Row
         c = conn.cursor()
-        # Use COALESCE to handle migration: prefer requested_at, fallback to created_at
-        c.execute("""SELECT id, username, email, 
-                     COALESCE(requested_at, created_at) as requested_at, status 
+        c.execute("""SELECT id, username, email, requested_at, status 
                      FROM pending_users WHERE status = 'pending' 
-                     ORDER BY COALESCE(requested_at, created_at) DESC""")
+                     ORDER BY requested_at DESC""")
         users = [dict(row) for row in c.fetchall()]
-        print(f"DEBUG: get_pending_users found {len(users)} pending users: {[u['username'] for u in users]}")
         conn.close()
         return users
     except Exception as e:
