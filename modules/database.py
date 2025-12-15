@@ -157,11 +157,15 @@ def log_ingestion_run(pipeline_name: str, status: str, started_at: str = None,
 # -----------------------------------------------------------------------------
 
 def add_user(username, password_hash, role="user"):
+    """Add a new user (admin-created, not via signup flow)"""
     try:
         conn = sqlite3.connect(SQLITE_DB_PATH)
         c = conn.cursor()
-        c.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", 
-                  (username, password_hash, role))
+        now_jakarta = datetime.now(ZoneInfo("Asia/Jakarta")).isoformat()
+        # For admin-created users, set created_at but no requested_at (since no approval flow)
+        c.execute("""INSERT INTO users (username, password_hash, role, created_at) 
+                     VALUES (?, ?, ?, ?)""", 
+                  (username, password_hash, role, now_jakarta))
         conn.commit()
         conn.close()
         return True

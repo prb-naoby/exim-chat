@@ -26,6 +26,9 @@ class UserOut(BaseModel):
     id: int
     username: str
     role: str
+    display_name: Optional[str] = None
+    requested_at: Optional[str] = None
+    created_at: Optional[str] = None
 
 class ChatMessage(BaseModel):
     role: str
