@@ -8,7 +8,7 @@ Logs ingestion results to database for admin dashboard tracking.
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -280,14 +280,18 @@ def start_scheduler():
     
     scheduler = AsyncIOScheduler(timezone=ZoneInfo('Asia/Jakarta'))
     
-    # Schedule all pipelines to run every 30 minutes, staggered by 5 minutes
+    now = datetime.now(ZoneInfo('Asia/Jakarta'))
+    
+    # Schedule all pipelines to run every 30 minutes
+    # All run immediately on startup, staggered by 2 minutes to prevent overload
+    
     scheduler.add_job(
         run_sop_ingestion,
         trigger=IntervalTrigger(minutes=30),
         id='sop_ingestion',
         name='SOP Ingestion Pipeline',
         replace_existing=True,
-        next_run_time=datetime.now(ZoneInfo('Asia/Jakarta'))  # Run immediately on start
+        next_run_time=now  # Run immediately
     )
     
     scheduler.add_job(
@@ -296,8 +300,7 @@ def start_scheduler():
         id='insw_ingestion', 
         name='INSW Ingestion Pipeline',
         replace_existing=True,
-        # Stagger by 5 minutes
-        next_run_time=datetime.now(ZoneInfo('Asia/Jakarta')).replace(second=0, microsecond=0)
+        next_run_time=now + timedelta(minutes=2)  # 2 min after SOP
     )
     
     scheduler.add_job(
@@ -305,7 +308,8 @@ def start_scheduler():
         trigger=IntervalTrigger(minutes=30),
         id='cases_ingestion',
         name='Cases Ingestion Pipeline',
-        replace_existing=True
+        replace_existing=True,
+        next_run_time=now + timedelta(minutes=4)  # 4 min after SOP
     )
     
     scheduler.add_job(
@@ -313,7 +317,8 @@ def start_scheduler():
         trigger=IntervalTrigger(minutes=30),
         id='general_ingestion',
         name='General Ingestion Pipeline',
-        replace_existing=True
+        replace_existing=True,
+        next_run_time=now + timedelta(minutes=6)  # 6 min after SOP
     )
     
     scheduler.start()
