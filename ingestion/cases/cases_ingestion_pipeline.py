@@ -150,12 +150,30 @@ class CasesIngestionPipeline:
                 if not question or question == 'nan':
                     continue
                 
+                # Track if this is an image-based answer
+                is_image_answer = False
+                image_bytes = None
+                
                 # Check if answer is empty but we have an image for this row
                 if (not answer or answer == 'nan' or answer.lower() == 'none') and idx in images_by_row:
-                    print(f"  Row {idx}: Answer is image, processing with OCR...")
+                    is_image_answer = True
                     image_bytes = images_by_row[idx]
                     
-                    # Use Gemini to analyze image and generate answer based on question
+                    # For image answers, use image hash (not generated text hash)
+                    # This avoids re-processing unchanged images with non-deterministic OCR
+                    import hashlib as hl
+                    new_hash = hl.md5(image_bytes).hexdigest()
+                    existing_hash = self.qdrant.get_case_content_hash(case_no)
+                    
+                    if existing_hash and existing_hash == new_hash:
+                        summary['skipped'].append({
+                            'case_no': case_no,
+                            'reason': 'Image unchanged'
+                        })
+                        continue
+                    
+                    # Image is new or changed, process with OCR
+                    print(f"  Row {idx}: Answer is image, processing with OCR...")
                     generated_answer = self.ocr_service.analyze_image_answer(
                         image_bytes=image_bytes,
                         question=question
@@ -173,10 +191,22 @@ class CasesIngestionPipeline:
                 if not answer or answer == 'nan':
                     continue
                 
+                # For text answers, check content hash
+                if not is_image_answer:
+                    new_hash = self.qdrant.compute_content_hash(question, answer, date_str)
+                    existing_hash = self.qdrant.get_case_content_hash(case_no)
+                    
+                    if existing_hash and existing_hash == new_hash:
+                        summary['skipped'].append({
+                            'case_no': case_no,
+                            'reason': 'Content unchanged'
+                        })
+                        continue
+                
                 # Create search text for embedding
                 search_text = f"Q: {question} A: {answer}"
                 
-                # Vectorize
+                # Vectorize (only if content changed)
                 dense_vector = self.vectorizer.vectorize_text(search_text)
                 
                 # Upsert to Qdrant

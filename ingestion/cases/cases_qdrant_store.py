@@ -6,6 +6,7 @@ Handles vector storage with hybrid search (dense + sparse BM25) for cases Q&A
 
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     VectorParams, Distance, PointStruct,
@@ -104,7 +105,11 @@ class CasesQdrantStore:
         # Create unique ID from case_no (use integer directly)
         point_id = case_no
         
-        # Create payload
+        # Create content hash for change detection
+        content_hash = hashlib.md5(f"{question}{answer}{date}".encode()).hexdigest()
+        
+        # Create payload with Asia/Jakarta timezone
+        now_jakarta = datetime.now(ZoneInfo("Asia/Jakarta"))
         payload = {
             'case_no': case_no,
             'date': date,
@@ -114,7 +119,8 @@ class CasesQdrantStore:
             'full_text': full_text,
             'source': 'cases_spreadsheet',
             'file_last_modified': file_last_modified,
-            'dateUpdated': datetime.utcnow().isoformat()
+            'content_hash': content_hash,
+            'dateUpdated': now_jakarta.isoformat()
         }
         
         # Upsert point with hybrid vectors
@@ -191,6 +197,26 @@ class CasesQdrantStore:
         except Exception as e:
             print(f"Error getting last modified: {str(e)}")
             return None
+    
+    def get_case_content_hash(self, case_no: int) -> Optional[str]:
+        """Get the content hash for a specific case to check if it needs updating"""
+        try:
+            points = self.client.retrieve(
+                collection_name=self.collection_name,
+                ids=[case_no],
+                with_payload=True
+            )
+            
+            if points:
+                return points[0].payload.get('content_hash')
+            return None
+        except Exception as e:
+            print(f"Error getting content hash for case {case_no}: {e}")
+            return None
+    
+    def compute_content_hash(self, question: str, answer: str, date: str) -> str:
+        """Compute content hash for comparison"""
+        return hashlib.md5(f"{question}{answer}{date}".encode()).hexdigest()
     
     def get_collection_stats(self) -> Dict[str, Any]:
         """Get collection statistics"""
