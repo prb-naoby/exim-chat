@@ -10,7 +10,7 @@ Workflow:
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from zoneinfo import ZoneInfo
-import oson
+import json
 import os
 
 from .onedrive_sync import OneDriveSync

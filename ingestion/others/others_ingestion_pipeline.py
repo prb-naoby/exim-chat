@@ -113,6 +113,32 @@ class OthersIngestionPipeline:
             payload = results[0][0].payload
             return payload.get('last_modified_onedrive')
         return None
+    
+    def delete_by_filename(self, filename: str) -> int:
+        """Delete all chunks for a given filename before re-ingesting to prevent duplicates"""
+        if not self.qdrant_client:
+            return 0
+            
+        try:
+            # Delete all points matching this filename
+            result = self.qdrant_client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="filename",
+                                match=models.MatchValue(value=filename)
+                            )
+                        ]
+                    )
+                )
+            )
+            print(f"  Deleted old chunks for {filename}")
+            return 1
+        except Exception as e:
+            print(f"  Warning: Could not delete old chunks for {filename}: {e}")
+            return 0
 
     def _chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
         """Simple text chunking"""
@@ -294,6 +320,9 @@ class OthersIngestionPipeline:
                     
                     # Upsert all points for the file in one go
                     if not dry_run and self.qdrant_client and points_to_upsert:
+                        # Delete old chunks first to prevent duplicates on re-ingestion
+                        self.delete_by_filename(filename)
+                        
                         self.qdrant_client.upsert(
                             collection_name=self.collection_name,
                             points=points_to_upsert,
