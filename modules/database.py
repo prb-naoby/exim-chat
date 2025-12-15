@@ -252,12 +252,15 @@ def add_pending_user(username, email, password_hash):
     try:
         conn = sqlite3.connect(SQLITE_DB_PATH)
         c = conn.cursor()
+        now_jakarta = datetime.now(ZoneInfo("Asia/Jakarta")).isoformat()
         c.execute("INSERT INTO pending_users (username, email, password_hash, requested_at) VALUES (?, ?, ?, ?)", 
-                  (username, email, password_hash, datetime.now(ZoneInfo("Asia/Jakarta"))))
+                  (username, email, password_hash, now_jakarta))
         conn.commit()
+        print(f"DEBUG: Added pending user '{username}' with email '{email}' at {now_jakarta}")
         conn.close()
         return True
-    except sqlite3.IntegrityError:
+    except sqlite3.IntegrityError as e:
+        print(f"DEBUG: IntegrityError adding pending user '{username}': {e}")
         return False
     except Exception as e:
         print(f"Error adding pending user: {e}")
@@ -275,6 +278,7 @@ def get_pending_users():
                      FROM pending_users WHERE status = 'pending' 
                      ORDER BY COALESCE(requested_at, created_at) DESC""")
         users = [dict(row) for row in c.fetchall()]
+        print(f"DEBUG: get_pending_users found {len(users)} pending users: {[u['username'] for u in users]}")
         conn.close()
         return users
     except Exception as e:

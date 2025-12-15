@@ -166,13 +166,17 @@ class UserRegister(BaseModel):
 @router.post("/auth/register")
 async def register_user(user: UserRegister):
     """Public endpoint for user registration. Creates a pending user for admin approval."""
+    print(f"DEBUG: Registration request received for username: {user.username}, email: {user.email}")
+    
     # Check if username already exists in users
     existing_user = database.get_user_by_username(user.username)
     if existing_user:
+        print(f"DEBUG: Username '{user.username}' already registered")
         raise HTTPException(status_code=400, detail="Username already registered")
     
     # Check if username already pending
     if database.check_pending_username_exists(user.username):
+        print(f"DEBUG: Username '{user.username}' already pending")
         raise HTTPException(status_code=400, detail="Registration already pending for this username")
     
     # Hash password and add to pending users
@@ -180,8 +184,10 @@ async def register_user(user: UserRegister):
     success = database.add_pending_user(user.username, user.email, hashed_password)
     
     if not success:
+        print(f"DEBUG: Failed to add pending user '{user.username}'")
         raise HTTPException(status_code=500, detail="Failed to submit registration request")
     
+    print(f"DEBUG: Registration successful for '{user.username}'")
     return {"message": "Registration request submitted. Please wait for admin approval."}
 
 # -----------------------------------------------------------------------------
@@ -218,7 +224,9 @@ async def delete_user(user_id: int):
 @router.get("/admin/pending-users", dependencies=[Depends(get_current_admin_user)])
 async def get_pending_users():
     """Get all pending registration requests"""
-    return database.get_pending_users()
+    pending = database.get_pending_users()
+    print(f"DEBUG: API returning {len(pending)} pending users")
+    return pending
 
 @router.post("/admin/pending-users/{user_id}/approve", dependencies=[Depends(get_current_admin_user)])
 async def approve_user(user_id: int):
