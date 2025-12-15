@@ -189,26 +189,25 @@ async def run_cases_ingestion():
         
         load_dotenv()
         
-        config = {
-            'tenant_id': os.getenv('MS_TENANT_ID'),
-            'client_id': os.getenv('MS_CLIENT_ID'),
-            'client_secret': os.getenv('MS_CLIENT_SECRET'),
-            'user_id': os.getenv('ONEDRIVE_DRIVE_ID'),
-            'folder_path': os.getenv('CASES_FOLDER_PATH', 'AI/Cases'),
-            'qdrant_url': os.getenv('CASES_QDRANT_URL'),
-            'qdrant_api_key': os.getenv('CASES_QDRANT_API_KEY'),
-            'collection_name': os.getenv('CASES_QDRANT_COLLECTION_NAME', 'cases_qna'),
-            'gemini_api_key': os.getenv('GEMINI_API_KEY'),
-            'embedding_model': os.getenv('EMBEDDING_MODEL', 'models/text-embedding-004'),
-            'vector_size': int(os.getenv('VECTOR_SIZE', '768')),
-            'batch_size': int(os.getenv('BATCH_SIZE', '50'))
-        }
+        pipeline = CasesIngestionPipeline(
+            tenant_id=os.getenv('MS_TENANT_ID'),
+            client_id=os.getenv('MS_CLIENT_ID'),
+            client_secret=os.getenv('MS_CLIENT_SECRET'),
+            user_id=os.getenv('ONEDRIVE_DRIVE_ID'),
+            folder_path=os.getenv('CASES_FOLDER_PATH', 'AI/Cases'),
+            qdrant_url=os.getenv('SOP_QDRANT_URL'),  # Use same Qdrant as SOP
+            qdrant_api_key=os.getenv('SOP_QDRANT_API_KEY'),
+            collection_name=os.getenv('CASES_QDRANT_COLLECTION_NAME', 'cases_qna'),
+            gemini_api_key=os.getenv('GEMINI_API_KEY'),
+            embedding_model=os.getenv('EMBEDDING_MODEL', 'models/text-embedding-004'),
+            vector_size=int(os.getenv('VECTOR_SIZE', '768')),
+            batch_size=int(os.getenv('BATCH_SIZE', '50'))
+        )
         
-        pipeline = CasesIngestionPipeline(**config)
-        summary = await asyncio.to_thread(pipeline.sync_and_upsert)
+        summary = await asyncio.to_thread(pipeline.sync_and_upsert, dry_run=False)
         
         log_ingestion_to_db('Cases', 'success', summary)
-        logger.info(f"Cases ingestion completed")
+        logger.info(f"Cases ingestion completed: {len(summary.get('upserted', []))} upserted")
         
     except Exception as e:
         logger.error(f"Cases ingestion failed: {e}")

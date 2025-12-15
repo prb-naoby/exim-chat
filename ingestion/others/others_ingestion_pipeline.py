@@ -92,27 +92,36 @@ class OthersIngestionPipeline:
     def get_last_modified(self, filename: str) -> Optional[str]:
         """Check if file exists in Qdrant and get its last modified date"""
         if not self.qdrant_client:
+            print(f"  DEBUG: Qdrant client not initialized for {filename}")
             return None
             
-        # Search by filename filter
-        results = self.qdrant_client.scroll(
-            collection_name=self.collection_name,
-            scroll_filter=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="filename",
-                        match=models.MatchValue(value=filename)
-                    )
-                ]
-            ),
-            limit=1,
-            with_payload=True
-        )
-        
-        if results[0]:
-            payload = results[0][0].payload
-            return payload.get('last_modified_onedrive')
-        return None
+        try:
+            # Search by filename filter
+            results = self.qdrant_client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="filename",
+                            match=models.MatchValue(value=filename)
+                        )
+                    ]
+                ),
+                limit=1,
+                with_payload=True
+            )
+            
+            if results[0]:
+                payload = results[0][0].payload
+                last_mod = payload.get('last_modified_onedrive')
+                print(f"  DEBUG: Found {filename} in Qdrant, last_modified={last_mod}")
+                return last_mod
+            else:
+                print(f"  DEBUG: {filename} NOT found in collection '{self.collection_name}'")
+                return None
+        except Exception as e:
+            print(f"  DEBUG: Error checking {filename} in Qdrant: {e}")
+            return None
     
     def delete_by_filename(self, filename: str) -> int:
         """Delete all chunks for a given filename before re-ingesting to prevent duplicates"""
