@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from .cases_onedrive_sync import CasesOneDriveSync
 from .cases_qdrant_store import CasesQdrantStore
 from ingestion.vectorizer import Vectorizer
+from modules.ocr_service import OCRService
 
 
 class CasesIngestionPipeline:
@@ -36,6 +37,8 @@ class CasesIngestionPipeline:
         vector_size: int = 768,
         batch_size: int = 50
     ):
+        self.gemini_api_key = gemini_api_key
+        
         # Initialize OneDrive sync
         self.onedrive = CasesOneDriveSync(
             tenant_id=tenant_id,
@@ -58,6 +61,9 @@ class CasesIngestionPipeline:
             model_name=embedding_model,
             api_key=gemini_api_key
         )
+        
+        # Initialize OCR service for image-based answers
+        self.ocr_service = OCRService(gemini_api_key=gemini_api_key)
         
         self.batch_size = batch_size
         self.collection_name = collection_name
@@ -106,33 +112,26 @@ class CasesIngestionPipeline:
         print("Ensuring Qdrant collection exists...")
         self.qdrant.create_collection()
         
-        # Step 3: Download and parse Excel
-        print("Downloading Excel file...")
-        df = self.onedrive.download_excel_as_dataframe()
+        # Step 3: Download and parse Excel (with image extraction)
+        print("Downloading Excel file with images...")
+        df, images_by_row = self.onedrive.download_excel_with_images()
         
         if df is None or df.empty:
             summary['errors'].append({'error': 'Failed to download or parse Excel file'})
             return summary
         
         summary['total_rows'] = len(df)
-        print(f"Downloaded {len(df)} rows from Excel")
+        print(f"Downloaded {len(df)} rows from Excel, {len(images_by_row)} images found")
         
         # Step 4: Process each row
         print(f"Processing rows...")
         
-        # Expected columns: NO, DATE, QUESTION, ANSWER
-        required_cols = ['NO', 'DATE', 'QUESTION', 'ANSWER']
-        columns = [str(c).upper().strip() for c in df.columns.tolist()]
-        
-        # Check if all required columns exist
-        missing = [c for c in required_cols if c not in columns]
-        if missing:
-            # Try case-insensitive match
-            df.columns = [str(c).upper().strip() for c in df.columns]
-        
+        # Normalize column names to uppercase
+        df.columns = [str(c).upper().strip() for c in df.columns]
         print(f"Excel columns: {df.columns.tolist()}")
         
         processed = 0
+        image_answers = 0
         for idx, row in df.iterrows():
             try:
                 # Extract fields using exact column names
@@ -147,8 +146,31 @@ class CasesIngestionPipeline:
                 else:
                     date_str = str(date_val)
                 
-                # Skip empty rows
-                if not question or not answer or question == 'nan' or answer == 'nan':
+                # Skip if no question
+                if not question or question == 'nan':
+                    continue
+                
+                # Check if answer is empty but we have an image for this row
+                if (not answer or answer == 'nan' or answer.lower() == 'none') and idx in images_by_row:
+                    print(f"  Row {idx}: Answer is image, processing with OCR...")
+                    image_bytes = images_by_row[idx]
+                    
+                    # Use Gemini to analyze image and generate answer based on question
+                    generated_answer = self.ocr_service.analyze_image_answer(
+                        image_bytes=image_bytes,
+                        question=question
+                    )
+                    
+                    if generated_answer:
+                        answer = generated_answer
+                        image_answers += 1
+                        print(f"  Row {idx}: Generated answer from image ({len(answer)} chars)")
+                    else:
+                        print(f"  Row {idx}: Failed to generate answer from image")
+                        continue
+                
+                # Skip if still no answer
+                if not answer or answer == 'nan':
                     continue
                 
                 # Create search text for embedding
@@ -183,8 +205,9 @@ class CasesIngestionPipeline:
                     'error': str(e)
                 })
         
-        print(f"\nProcessing complete! {processed} cases upserted.")
+        print(f"\nProcessing complete! {processed} cases upserted ({image_answers} from images).")
         summary['total_processed'] = processed
+        summary['image_answers'] = image_answers
         
         return summary
     

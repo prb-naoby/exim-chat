@@ -122,3 +122,82 @@ Rules:
         except Exception as e:
             print(f"GenAI OCR Error: {e}")
             return None
+
+    def analyze_image_answer(self, image_bytes: bytes, question: str, model_name: str = "gemini-2.5-flash") -> Optional[str]:
+        """
+        Analyze an image and generate an answer based on the question context.
+        Used for Cases Q&A where the answer is an image/screenshot.
+        
+        Args:
+            image_bytes: Raw image bytes (PNG, JPEG, etc.)
+            question: The question that this image is answering
+            model_name: Gemini model to use
+            
+        Returns:
+            Generated text answer or None
+        """
+        if not self.gemini_client:
+            print("Gemini client not initialized")
+            return None
+            
+        try:
+            import base64
+            
+            # Detect MIME type from magic bytes
+            mime_type = "image/png"  # default
+            if image_bytes[:3] == b'\xff\xd8\xff':
+                mime_type = "image/jpeg"
+            elif image_bytes[:4] == b'\x89PNG':
+                mime_type = "image/png"
+            elif image_bytes[:4] == b'GIF8':
+                mime_type = "image/gif"
+            
+            # Prompt that instructs Gemini to answer the question based on image
+            prompt = f"""Pertanyaan: {question}
+
+Lihat gambar di bawah dan jawab pertanyaan di atas secara langsung.
+
+Aturan:
+1. Jawab pertanyaan secara LANGSUNG tanpa menyebut "gambar", "screenshot", "berdasarkan gambar", dll.
+2. Tulis jawaban seolah-olah Anda yang mengetahui informasinya, bukan mengekstrak dari gambar.
+3. Jika gambar menunjukkan langkah-langkah, jelaskan langkah-langkahnya secara jelas.
+4. Jika gambar menunjukkan data/tabel, sajikan informasinya secara terstruktur.
+5. Gunakan Bahasa Indonesia.
+6. Langsung pada inti jawaban, JANGAN awali dengan "Jawaban:" atau pengantar lainnya.
+
+Jawaban:"""
+            
+            # Prepare content
+            b64_data = base64.b64encode(image_bytes).decode('utf-8')
+            
+            if types and hasattr(types, 'Part'):
+                parts = [
+                    types.Part(text=prompt),
+                    types.Part(
+                        inline_data=types.Blob(
+                            mime_type=mime_type,
+                            data=b64_data
+                        )
+                    )
+                ]
+                
+                response = self.gemini_client.models.generate_content(
+                    model=model_name,
+                    contents=[types.Content(role="user", parts=parts)]
+                )
+            else:
+                response = self.gemini_client.models.generate_content(
+                    model=model_name,
+                    contents=[
+                        {"role": "user", "parts": [
+                            {"text": prompt},
+                            {"inline_data": {"mime_type": mime_type, "data": b64_data}}
+                        ]}
+                    ]
+                )
+                
+            return response.text.strip()
+            
+        except Exception as e:
+            print(f"Image Analysis Error: {e}")
+            return None

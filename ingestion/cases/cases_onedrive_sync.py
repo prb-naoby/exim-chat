@@ -114,6 +114,88 @@ class CasesOneDriveSync:
         except Exception as e:
             print(f"Error reading Excel: {str(e)}")
             return None
+
+    def download_excel_with_images(self) -> tuple:
+        """
+        Download Excel file and extract images.
+        Returns (DataFrame, dict mapping row_number -> image_bytes)
+        """
+        file_metadata = self.get_excel_file_metadata()
+        
+        if not file_metadata:
+            return None, {}
+        
+        print(f"Downloading Excel file with images: {file_metadata['name']}")
+        
+        access_token = self._get_access_token()
+        headers = {'Authorization': f'Bearer {access_token}'}
+        
+        # Download file content
+        download_url = f"https://graph.microsoft.com/v1.0/users/{self.user_id}/drive/items/{file_metadata['id']}/content"
+        response = requests.get(download_url, headers=headers)
+        
+        if response.status_code != 200:
+            print(f"Error downloading file: {response.status_code}")
+            return None, {}
+        
+        excel_bytes = io.BytesIO(response.content)
+        
+        # Read DataFrame
+        try:
+            df = pd.read_excel(excel_bytes)
+            print(f"Successfully loaded {len(df)} rows from Excel")
+        except Exception as e:
+            print(f"Error reading Excel: {str(e)}")
+            return None, {}
+        
+        # Extract images using openpyxl
+        images_by_row = {}
+        try:
+            from openpyxl import load_workbook
+            
+            excel_bytes.seek(0)  # Reset stream position
+            workbook = load_workbook(excel_bytes)
+            sheet = workbook.active
+            
+            # Get images from the sheet
+            if hasattr(sheet, '_images') and sheet._images:
+                print(f"Found {len(sheet._images)} images in Excel")
+                
+                for img in sheet._images:
+                    # Get image anchor position (row number)
+                    # Images are anchored to cells via anchor attribute
+                    if hasattr(img, 'anchor'):
+                        anchor = img.anchor
+                        if hasattr(anchor, '_from'):
+                            row = anchor._from.row  # 0-indexed
+                        elif hasattr(anchor, 'row'):
+                            row = anchor.row
+                        else:
+                            row = 0
+                    else:
+                        row = 0
+                    
+                    # Extract image bytes
+                    if hasattr(img, '_data'):
+                        img_bytes = img._data()
+                    elif hasattr(img, 'ref'):
+                        # Try to get image from ref
+                        img_bytes = img.ref.getvalue() if hasattr(img.ref, 'getvalue') else None
+                    else:
+                        img_bytes = None
+                    
+                    if img_bytes:
+                        images_by_row[row] = img_bytes
+                        print(f"  Extracted image for row {row}")
+            else:
+                print("No images found in Excel")
+                
+        except ImportError:
+            print("openpyxl not installed - image extraction not available")
+        except Exception as e:
+            print(f"Error extracting images: {e}")
+        
+        return df, images_by_row
     
     def get_file_last_modified(self) -> Optional[datetime]:
         """Get last modified datetime of the Excel file"""
