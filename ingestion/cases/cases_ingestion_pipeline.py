@@ -172,8 +172,11 @@ class CasesIngestionPipeline:
                         })
                         continue
                     
-                    # Image is new or changed, process with OCR
-                    print(f"  Row {idx}: Answer is image, processing with OCR...")
+                    # Log whether this is a new case or update
+                    if existing_hash is None:
+                        print(f"  Row {idx}: NEW case with image answer, processing OCR...")
+                    else:
+                        print(f"  Row {idx}: Image CHANGED, re-processing OCR...")
                     generated_answer = self.ocr_service.analyze_image_answer(
                         image_bytes=image_bytes,
                         question=question
@@ -202,6 +205,12 @@ class CasesIngestionPipeline:
                             'reason': 'Content unchanged'
                         })
                         continue
+                    
+                    # Log whether this is a new case or update
+                    if existing_hash is None:
+                        print(f"  Case {case_no}: NEW case with text answer")
+                    else:
+                        print(f"  Case {case_no}: Content CHANGED, updating...")
                 
                 # Create search text for embedding
                 search_text = f"Q: {question} A: {answer}"
